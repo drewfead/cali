@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package calendar;
+
+option go_package = "github.com/drewfead/cali/proto";
+
+import "google/protobuf/timestamp.proto";
+
+service CalendarService {
+  // AddEvent adds a one-time calendar event
+  rpc AddEvent(AddEventRequest) returns (AddEventResponse);
+}
+
+message AddEventRequest {
+  string title = 1;
+  string description = 2;
+  google.protobuf.Timestamp start_time = 3;
+  google.protobuf.Timestamp end_time = 4;
+  string location = 5;
+}
+
+message AddEventResponse {
+  string event_id = 1;
+  bool success = 2;
+  string message = 3;
+}
