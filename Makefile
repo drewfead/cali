@@ -60,21 +60,6 @@ test/unit: ## Run unit tests only
 test/integration: ## Run integration tests only
 	go test -v -race -run "^TestIntegration_" ./...
 
-.PHONY: test/cli
-test/cli: build ## Build and test the cal CLI
-	@echo "Testing cal CLI..."
-	@echo "  Testing direct call..."
-	@$(BIN_DIR)/cal calendarservice addevent --title "Test Event" --description "Test" --location "Test Location" --format json > /dev/null 2>&1 && echo "  ✓ Direct call works" || (echo "  ✗ Direct call failed" && exit 1)
-	@echo "  Testing daemon..."
-	@$(BIN_DIR)/cal daemonize --port 50099 > /tmp/test-daemon.log 2>&1 & \
-		DAEMON_PID=$$! && \
-		sleep 2 && \
-		$(BIN_DIR)/cal calendarservice addevent --title "Test Event" --description "Test" --location "Test Location" --format json --remote localhost:50099 > /dev/null 2>&1 && \
-		kill $$DAEMON_PID 2>/dev/null && \
-		echo "  ✓ Remote call works" || \
-		(kill $$DAEMON_PID 2>/dev/null; echo "  ✗ Remote call failed" && exit 1)
-	@echo "✓ CLI tests passed"
-
 ##@ Lint
 
 .PHONY: lint
@@ -85,23 +70,6 @@ lint: ## Run linter on all files
 fmt: ## Auto-format code
 	go run github.com/golangci/golangci-lint/cmd/golangci-lint fmt ./...
 	go fmt ./...
-
-##@ Development
-
-.PHONY: dev/setup
-dev/setup: ## Set up development environment
-	@echo "Setting up development environment..."
-	go mod download
-	go mod tidy
-	@echo "✓ Development environment ready"
-
-.PHONY: dev/run
-dev/run: generate build ## Generate proto and build for quick testing
-	@echo "✓ Cal ready for testing"
-	@echo ""
-	@echo "Try these commands:"
-	@echo "  $(BIN_DIR)/cal calendarservice addevent --title 'Team Meeting' --description 'Weekly standup' --location 'Conference Room A' --format json"
-	@echo "  $(BIN_DIR)/cal daemonize --port 50051"
 
 ##@ Misc.
 
