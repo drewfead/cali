@@ -9,6 +9,7 @@ import (
 	v3 "github.com/urfave/cli/v3"
 	grpc "google.golang.org/grpc"
 	insecure "google.golang.org/grpc/credentials/insecure"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	"io"
 	"os"
 )
@@ -22,7 +23,8 @@ func getOutputWriter(path string) (io.Writer, error) {
 }
 
 // CalendarServiceServiceCommand creates a service CLI for CalendarService with options
-func CalendarServiceServiceCommand(ctx context.Context, impl CalendarServiceServer, opts ...protocli.ServiceOption) *protocli.ServiceCLI {
+// The implOrFactory parameter can be either a direct service implementation or a factory function
+func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{}, opts ...protocli.ServiceOption) *protocli.ServiceCLI {
 	options := protocli.ApplyServiceOptions(opts...)
 
 	// Determine default format (first registered format, or empty if none)
@@ -33,8 +35,8 @@ func CalendarServiceServiceCommand(ctx context.Context, impl CalendarServiceServ
 
 	var commands []*v3.Command
 
-	// Build flags for addevent
-	flags_addevent := []v3.Flag{&v3.StringFlag{
+	// Build flags for add-event
+	flags_add_event := []v3.Flag{&v3.StringFlag{
 		Name:  "remote",
 		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
 	}, &v3.StringFlag{
@@ -47,24 +49,36 @@ func CalendarServiceServiceCommand(ctx context.Context, impl CalendarServiceServ
 		Value: "-",
 	}}
 
-	flags_addevent = append(flags_addevent, &v3.StringFlag{
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
 		Name:  "title",
 		Usage: "Title",
 	})
-	flags_addevent = append(flags_addevent, &v3.StringFlag{
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
 		Name:  "description",
 		Usage: "Description",
 	})
-	flags_addevent = append(flags_addevent, &v3.StringFlag{
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "start-time",
+		Usage: "StartTime (google.protobuf.Timestamp)",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "end-time",
+		Usage: "EndTime (google.protobuf.Timestamp)",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
 		Name:  "location",
 		Usage: "Location",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
 	})
 
 	// Add format-specific flags from registered formats
 	for _, outputFmt := range options.OutputFormats() {
 		// Check if format implements FlagConfiguredOutputFormat
 		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
-			flags_addevent = append(flags_addevent, flagConfigured.Flags()...)
+			flags_add_event = append(flags_add_event, flagConfigured.Flags()...)
 		}
 	}
 
@@ -84,11 +98,84 @@ func CalendarServiceServiceCommand(ctx context.Context, impl CalendarServiceServ
 				}
 			}()
 
-			req := &AddEventRequest{}
+			// Build request message
+			var req *AddEventRequest
 
-			req.Title = cmd.String("title")
-			req.Description = cmd.String("description")
-			req.Location = cmd.String("location")
+			// Check for custom flag deserializer for calendar.AddEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.AddEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*AddEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "AddEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &AddEventRequest{}
+				req.Title = cmd.String("title")
+				req.Description = cmd.String("description")
+				// Field StartTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: start-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "start-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field StartTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.StartTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("start-time") {
+						return fmt.Errorf("flag --start-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				// Field EndTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: end-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "end-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field EndTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.EndTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("end-time") {
+						return fmt.Errorf("flag --end-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				req.Location = cmd.String("location")
+				req.CalendarId = cmd.String("calendar-id")
+			}
 
 			// Check if using remote gRPC call or direct implementation call
 			remoteAddr := cmd.String("remote")
@@ -109,8 +196,9 @@ func CalendarServiceServiceCommand(ctx context.Context, impl CalendarServiceServ
 					return fmt.Errorf("remote call failed: %w", err)
 				}
 			} else {
-				// Direct implementation call
-				resp, err = impl.AddEvent(cmdCtx, req)
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.AddEvent(cmdCtx, req)
 				if err != nil {
 					return fmt.Errorf("method failed: %w", err)
 				}
@@ -148,19 +236,22 @@ func CalendarServiceServiceCommand(ctx context.Context, impl CalendarServiceServ
 			}
 			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
 		},
-		Flags: flags_addevent,
-		Name:  "addevent",
+		Flags: flags_add_event,
+		Name:  "add-event",
 		Usage: "Call AddEvent RPC",
 	})
 
 	return &protocli.ServiceCLI{
 		Command: &v3.Command{
 			Commands: commands,
-			Name:     "calendarservice",
+			Name:     "calendar-service",
 			Usage:    "CLI for CalendarService",
 		},
-		RegisterFunc: func(s *grpc.Server) {
-			RegisterCalendarServiceServer(s, impl)
+		ConfigMessageType: "",
+		FactoryOrImpl:     implOrFactory,
+		RegisterFunc: func(s *grpc.Server, impl interface{}) {
+			RegisterCalendarServiceServer(s, impl.(CalendarServiceServer))
 		},
+		ServiceName: "calendar-service",
 	}
 }

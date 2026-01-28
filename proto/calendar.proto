@@ -17,10 +17,13 @@ message AddEventRequest {
   google.protobuf.Timestamp start_time = 3;
   google.protobuf.Timestamp end_time = 4;
   string location = 5;
+  string calendar_id = 6;  // defaults to "primary"
 }
 
 message AddEventResponse {
   string event_id = 1;
   bool success = 2;
   string message = 3;
+  string html_link = 4;     // Link to view in Google Calendar
+  string calendar_id = 5;   // Which calendar was used
 }

@@ -28,3 +28,8 @@ temp/
 **/secret/
 **/.env.*
 **/*pleaserc*
+
+# Google Calendar OAuth credentials and service accounts
+credentials.json
+token.json
+service-account.json

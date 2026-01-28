@@ -29,6 +29,7 @@ type AddEventRequest struct {
 	StartTime     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
 	EndTime       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
 	Location      string                 `protobuf:"bytes,5,opt,name=location,proto3" json:"location,omitempty"`
+	CalendarId    string                 `protobuf:"bytes,6,opt,name=calendar_id,json=calendarId,proto3" json:"calendar_id,omitempty"` // defaults to "primary"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -98,11 +99,20 @@ func (x *AddEventRequest) GetLocation() string {
 	return ""
 }
 
+func (x *AddEventRequest) GetCalendarId() string {
+	if x != nil {
+		return x.CalendarId
+	}
+	return ""
+}
+
 type AddEventResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
 	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
 	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	HtmlLink      string                 `protobuf:"bytes,4,opt,name=html_link,json=htmlLink,proto3" json:"html_link,omitempty"`       // Link to view in Google Calendar
+	CalendarId    string                 `protobuf:"bytes,5,opt,name=calendar_id,json=calendarId,proto3" json:"calendar_id,omitempty"` // Which calendar was used
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -158,22 +168,41 @@ func (x *AddEventResponse) GetMessage() string {
 	return ""
 }
 
+func (x *AddEventResponse) GetHtmlLink() string {
+	if x != nil {
+		return x.HtmlLink
+	}
+	return ""
+}
+
+func (x *AddEventResponse) GetCalendarId() string {
+	if x != nil {
+		return x.CalendarId
+	}
+	return ""
+}
+
 var File_proto_calendar_proto protoreflect.FileDescriptor
 
 const file_proto_calendar_proto_rawDesc = "" +
 	"\n" +
-	"\x14proto/calendar.proto\x12\bcalendar\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd7\x01\n" +
+	"\x14proto/calendar.proto\x12\bcalendar\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf8\x01\n" +
 	"\x0fAddEventRequest\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x129\n" +
 	"\n" +
 	"start_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
 	"\bend_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\x12\x1a\n" +
-	"\blocation\x18\x05 \x01(\tR\blocation\"a\n" +
+	"\blocation\x18\x05 \x01(\tR\blocation\x12\x1f\n" +
+	"\vcalendar_id\x18\x06 \x01(\tR\n" +
+	"calendarId\"\x9f\x01\n" +
 	"\x10AddEventResponse\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage2T\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1b\n" +
+	"\thtml_link\x18\x04 \x01(\tR\bhtmlLink\x12\x1f\n" +
+	"\vcalendar_id\x18\x05 \x01(\tR\n" +
+	"calendarId2T\n" +
 	"\x0fCalendarService\x12A\n" +
 	"\bAddEvent\x12\x19.calendar.AddEventRequest\x1a\x1a.calendar.AddEventResponseB}\n" +
 	"\fcom.calendarB\rCalendarProtoP\x01Z\x1egithub.com/drewfead/cali/proto\xa2\x02\x03CXX\xaa\x02\bCalendar\xca\x02\bCalendar\xe2\x02\x14Calendar\\GPBMetadata\xea\x02\bCalendarb\x06proto3"

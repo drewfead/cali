@@ -1,0 +1,67 @@
+# Example configuration file for cali
+# Copy this to ~/.config/cali/config.yaml or ./cali.yaml
+
+# =============================================================================
+# Configuration structure
+# =============================================================================
+# The configuration must be under services.cali to be recognized by proto-cli
+
+services:
+  cali:
+    # =============================================================================
+    # OPTION 1: Service Account (for automation/cron jobs)
+    # =============================================================================
+    # Embed the contents of your service account JSON file here.
+    # This is preferred for automated/unattended operation.
+
+    auth:
+      service_account:
+        type: "service_account"
+        project_id: "your-project-id"
+        private_key_id: "your-private-key-id"
+        private_key: "-----BEGIN PRIVATE KEY-----\nYourPrivateKeyHere\n-----END PRIVATE KEY-----\n"
+        client_email: "your-service-account@your-project.iam.gserviceaccount.com"
+        client_id: "123456789"
+        auth_uri: "https://accounts.google.com/o/oauth2/auth"
+        token_uri: "https://oauth2.googleapis.com/token"
+        auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs"
+        client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
+
+    # =============================================================================
+    # OPTION 2: OAuth Client (for interactive CLI usage)
+    # =============================================================================
+    # Embed the contents of your OAuth client credentials JSON file here.
+    # This is used for interactive browser-based authentication.
+
+    # auth:
+    #   oauth_client:
+    #     client_id: "your-client-id.apps.googleusercontent.com"
+    #     client_secret: "your-client-secret"
+    #     project_id: "your-project-id"
+    #     auth_uri: "https://accounts.google.com/o/oauth2/auth"
+    #     token_uri: "https://oauth2.googleapis.com/token"
+    #     auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs"
+    #     redirect_uris: ["http://localhost"]
+    #   oauth_token_path: "~/.config/cali/token.json"  # Optional, defaults to this path
+
+    # =============================================================================
+    # Default calendar ID
+    # =============================================================================
+    default_calendar_id: "primary"
+
+# =============================================================================
+# Environment Variable Support
+# =============================================================================
+# You can also set any config value via environment variables using the CALI_ prefix.
+# Nested fields use underscores. Examples:
+#
+#   export CALI_AUTH_SERVICE_ACCOUNT_PROJECT_ID="my-project"
+#   export CALI_AUTH_SERVICE_ACCOUNT_CLIENT_EMAIL="bot@project.iam.gserviceaccount.com"
+#   export CALI_AUTH_OAUTH_CLIENT_CLIENT_ID="xxx.apps.googleusercontent.com"
+#   export CALI_AUTH_OAUTH_CLIENT_CLIENT_SECRET="your-secret"
+#   export CALI_DEFAULT_CALENDAR_ID="your-calendar-id@group.calendar.google.com"
+#
+# This is especially useful for:
+# - Containerized deployments
+# - CI/CD pipelines
+# - Keeping secrets out of config files

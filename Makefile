@@ -9,18 +9,18 @@ INSTALL_LOCATION ?= ~/bin
 ##@ Build
 
 .PHONY: build
-build: ## Build the cal binary
-	@echo "Building cal..."
+build: ## Build the cali binary
+	@echo "Building cali..."
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/cal .
-	@echo "✓ Built: $(BIN_DIR)/cal"
+	go build -o $(BIN_DIR)/cali .
+	@echo "✓ Built: $(BIN_DIR)/cali"
 
 .PHONY: install
 install: build ## Build and install cal to ~/bin (override with INSTALL_LOCATION=/path)
-	@echo "Installing cal to $(INSTALL_LOCATION)..."
+	@echo "Installing cali to $(INSTALL_LOCATION)..."
 	@mkdir -p $(INSTALL_LOCATION)
-	cp $(BIN_DIR)/cal $(INSTALL_LOCATION)/cal
-	@echo "✓ Installed: $(INSTALL_LOCATION)/cal"
+	cp $(BIN_DIR)/cali $(INSTALL_LOCATION)/cali
+	@echo "✓ Installed: $(INSTALL_LOCATION)/cali"
 
 .PHONY: clean
 clean: ## Clean build artifacts and generated proto files
@@ -64,11 +64,11 @@ test/integration: ## Run integration tests only
 
 .PHONY: lint
 lint: ## Run linter on all files
-	go run github.com/golangci/golangci-lint/cmd/golangci-lint run ./...
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint run ./...
 
 .PHONY: fmt
 fmt: ## Auto-format code
-	go run github.com/golangci/golangci-lint/cmd/golangci-lint fmt ./...
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint fmt ./...
 	go fmt ./...
 
 ##@ Misc.
