@@ -11,6 +11,9 @@ message CaliConfig {
 
   // Default calendar ID to use when not specified
   string default_calendar_id = 2;
+
+  // API endpoint override (for testing with mock servers)
+  string api_endpoint = 3;
 }
 
 // AuthConfig holds authentication settings

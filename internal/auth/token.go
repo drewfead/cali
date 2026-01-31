@@ -8,7 +8,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const tokenFilePermMode = 0600
+const tokenFilePermMode = 0o600
 
 // LoadToken loads an OAuth token from the specified file path
 func LoadToken(tokenPath string) (*oauth2.Token, error) {

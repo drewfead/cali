@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	configDirName       = "cali"
-	credentialsFile     = "credentials.json"
-	serviceAccountFile  = "service-account.json"
-	tokenFile           = "token.json"
-	configDirPermMode   = 0700
+	configDirName      = "cali"
+	credentialsFile    = "credentials.json"
+	serviceAccountFile = "service-account.json"
+	tokenFile          = "token.json"
+	configDirPermMode  = 0o700
 )
 
 // GetConfigDir returns the configuration directory path (~/.config/cali)

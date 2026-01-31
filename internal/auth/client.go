@@ -3,8 +3,8 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"os"
 	"os/exec"
 	"runtime"
 
@@ -79,11 +79,11 @@ func GetTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 
 	// Open browser
-	fmt.Fprintf(os.Stderr, "Opening browser for authorization...\n")
-	fmt.Fprintf(os.Stderr, "If the browser doesn't open automatically, visit:\n%s\n\n", authURL)
+	slog.Info("opening browser for authorization")
+	slog.Info("if the browser doesn't open automatically, visit this URL", "url", authURL)
 
 	if err := openBrowser(authURL); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open browser automatically: %v\n", err)
+		slog.Warn("failed to open browser automatically", "error", err)
 	}
 
 	// Wait for authorization code or error

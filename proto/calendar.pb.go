@@ -2,11 +2,12 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: proto/calendar.proto
+// source: calendar.proto
 
 package proto
 
 import (
+	_ "github.com/drewfead/proto-cli/proto/cli/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -23,20 +24,27 @@ const (
 )
 
 type AddEventRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
-	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
-	StartTime     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
-	EndTime       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
-	Location      string                 `protobuf:"bytes,5,opt,name=location,proto3" json:"location,omitempty"`
-	CalendarId    string                 `protobuf:"bytes,6,opt,name=calendar_id,json=calendarId,proto3" json:"calendar_id,omitempty"` // defaults to "primary"
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	Summary                 string                 `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
+	Description             *string                `protobuf:"bytes,2,opt,name=description,proto3,oneof" json:"description,omitempty"` // supports HTML
+	StartTime               *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"`
+	EndTime                 *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`
+	Location                *string                `protobuf:"bytes,5,opt,name=location,proto3,oneof" json:"location,omitempty"`
+	CalendarId              *string                `protobuf:"bytes,6,opt,name=calendar_id,json=calendarId,proto3,oneof" json:"calendar_id,omitempty"`                                               // defaults to "primary"
+	GuestsCanSeeOtherGuests *bool                  `protobuf:"varint,7,opt,name=guests_can_see_other_guests,json=guestsCanSeeOtherGuests,proto3,oneof" json:"guests_can_see_other_guests,omitempty"` // default false
+	GuestsCanModify         *bool                  `protobuf:"varint,8,opt,name=guests_can_modify,json=guestsCanModify,proto3,oneof" json:"guests_can_modify,omitempty"`                             // default false
+	GuestsCanInviteOthers   *bool                  `protobuf:"varint,9,opt,name=guests_can_invite_others,json=guestsCanInviteOthers,proto3,oneof" json:"guests_can_invite_others,omitempty"`         // default false
+	IdempotencyKey          *string                `protobuf:"bytes,10,opt,name=idempotency_key,json=idempotencyKey,proto3,oneof" json:"idempotency_key,omitempty"`                                  // used to set event ID for deduplication
+	SourceTitle             *string                `protobuf:"bytes,11,opt,name=source_title,json=sourceTitle,proto3,oneof" json:"source_title,omitempty"`                                           // title of the source of the event
+	SourceUrl               *string                `protobuf:"bytes,12,opt,name=source_url,json=sourceUrl,proto3,oneof" json:"source_url,omitempty"`                                                 // URL for the source of the event
+	BlocksTime              *bool                  `protobuf:"varint,13,opt,name=blocks_time,json=blocksTime,proto3,oneof" json:"blocks_time,omitempty"`                                             // default false (transparent), true means opaque
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *AddEventRequest) Reset() {
 	*x = AddEventRequest{}
-	mi := &file_proto_calendar_proto_msgTypes[0]
+	mi := &file_calendar_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +56,7 @@ func (x *AddEventRequest) String() string {
 func (*AddEventRequest) ProtoMessage() {}
 
 func (x *AddEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_calendar_proto_msgTypes[0]
+	mi := &file_calendar_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,19 +69,19 @@ func (x *AddEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddEventRequest.ProtoReflect.Descriptor instead.
 func (*AddEventRequest) Descriptor() ([]byte, []int) {
-	return file_proto_calendar_proto_rawDescGZIP(), []int{0}
+	return file_calendar_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *AddEventRequest) GetTitle() string {
+func (x *AddEventRequest) GetSummary() string {
 	if x != nil {
-		return x.Title
+		return x.Summary
 	}
 	return ""
 }
 
 func (x *AddEventRequest) GetDescription() string {
-	if x != nil {
-		return x.Description
+	if x != nil && x.Description != nil {
+		return *x.Description
 	}
 	return ""
 }
@@ -93,17 +101,66 @@ func (x *AddEventRequest) GetEndTime() *timestamppb.Timestamp {
 }
 
 func (x *AddEventRequest) GetLocation() string {
-	if x != nil {
-		return x.Location
+	if x != nil && x.Location != nil {
+		return *x.Location
 	}
 	return ""
 }
 
 func (x *AddEventRequest) GetCalendarId() string {
-	if x != nil {
-		return x.CalendarId
+	if x != nil && x.CalendarId != nil {
+		return *x.CalendarId
 	}
 	return ""
+}
+
+func (x *AddEventRequest) GetGuestsCanSeeOtherGuests() bool {
+	if x != nil && x.GuestsCanSeeOtherGuests != nil {
+		return *x.GuestsCanSeeOtherGuests
+	}
+	return false
+}
+
+func (x *AddEventRequest) GetGuestsCanModify() bool {
+	if x != nil && x.GuestsCanModify != nil {
+		return *x.GuestsCanModify
+	}
+	return false
+}
+
+func (x *AddEventRequest) GetGuestsCanInviteOthers() bool {
+	if x != nil && x.GuestsCanInviteOthers != nil {
+		return *x.GuestsCanInviteOthers
+	}
+	return false
+}
+
+func (x *AddEventRequest) GetIdempotencyKey() string {
+	if x != nil && x.IdempotencyKey != nil {
+		return *x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *AddEventRequest) GetSourceTitle() string {
+	if x != nil && x.SourceTitle != nil {
+		return *x.SourceTitle
+	}
+	return ""
+}
+
+func (x *AddEventRequest) GetSourceUrl() string {
+	if x != nil && x.SourceUrl != nil {
+		return *x.SourceUrl
+	}
+	return ""
+}
+
+func (x *AddEventRequest) GetBlocksTime() bool {
+	if x != nil && x.BlocksTime != nil {
+		return *x.BlocksTime
+	}
+	return false
 }
 
 type AddEventResponse struct {
@@ -119,7 +176,7 @@ type AddEventResponse struct {
 
 func (x *AddEventResponse) Reset() {
 	*x = AddEventResponse{}
-	mi := &file_proto_calendar_proto_msgTypes[1]
+	mi := &file_calendar_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -131,7 +188,7 @@ func (x *AddEventResponse) String() string {
 func (*AddEventResponse) ProtoMessage() {}
 
 func (x *AddEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_calendar_proto_msgTypes[1]
+	mi := &file_calendar_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -144,7 +201,7 @@ func (x *AddEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddEventResponse.ProtoReflect.Descriptor instead.
 func (*AddEventResponse) Descriptor() ([]byte, []int) {
-	return file_proto_calendar_proto_rawDescGZIP(), []int{1}
+	return file_calendar_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *AddEventResponse) GetEventId() string {
@@ -182,81 +239,721 @@ func (x *AddEventResponse) GetCalendarId() string {
 	return ""
 }
 
-var File_proto_calendar_proto protoreflect.FileDescriptor
+type UpdateEventRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	EventId                 string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	CalendarId              *string                `protobuf:"bytes,2,opt,name=calendar_id,json=calendarId,proto3,oneof" json:"calendar_id,omitempty"` // defaults to "primary"
+	Summary                 *string                `protobuf:"bytes,3,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
+	Description             *string                `protobuf:"bytes,4,opt,name=description,proto3,oneof" json:"description,omitempty"` // supports HTML
+	StartTime               *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"`
+	EndTime                 *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`
+	Location                *string                `protobuf:"bytes,7,opt,name=location,proto3,oneof" json:"location,omitempty"`
+	GuestsCanSeeOtherGuests *bool                  `protobuf:"varint,8,opt,name=guests_can_see_other_guests,json=guestsCanSeeOtherGuests,proto3,oneof" json:"guests_can_see_other_guests,omitempty"`
+	GuestsCanModify         *bool                  `protobuf:"varint,9,opt,name=guests_can_modify,json=guestsCanModify,proto3,oneof" json:"guests_can_modify,omitempty"`
+	GuestsCanInviteOthers   *bool                  `protobuf:"varint,10,opt,name=guests_can_invite_others,json=guestsCanInviteOthers,proto3,oneof" json:"guests_can_invite_others,omitempty"`
+	SourceTitle             *string                `protobuf:"bytes,11,opt,name=source_title,json=sourceTitle,proto3,oneof" json:"source_title,omitempty"`
+	SourceUrl               *string                `protobuf:"bytes,12,opt,name=source_url,json=sourceUrl,proto3,oneof" json:"source_url,omitempty"`
+	BlocksTime              *bool                  `protobuf:"varint,13,opt,name=blocks_time,json=blocksTime,proto3,oneof" json:"blocks_time,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
 
-const file_proto_calendar_proto_rawDesc = "" +
+func (x *UpdateEventRequest) Reset() {
+	*x = UpdateEventRequest{}
+	mi := &file_calendar_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateEventRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateEventRequest) ProtoMessage() {}
+
+func (x *UpdateEventRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_calendar_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateEventRequest.ProtoReflect.Descriptor instead.
+func (*UpdateEventRequest) Descriptor() ([]byte, []int) {
+	return file_calendar_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *UpdateEventRequest) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
+}
+
+func (x *UpdateEventRequest) GetCalendarId() string {
+	if x != nil && x.CalendarId != nil {
+		return *x.CalendarId
+	}
+	return ""
+}
+
+func (x *UpdateEventRequest) GetSummary() string {
+	if x != nil && x.Summary != nil {
+		return *x.Summary
+	}
+	return ""
+}
+
+func (x *UpdateEventRequest) GetDescription() string {
+	if x != nil && x.Description != nil {
+		return *x.Description
+	}
+	return ""
+}
+
+func (x *UpdateEventRequest) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *UpdateEventRequest) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+func (x *UpdateEventRequest) GetLocation() string {
+	if x != nil && x.Location != nil {
+		return *x.Location
+	}
+	return ""
+}
+
+func (x *UpdateEventRequest) GetGuestsCanSeeOtherGuests() bool {
+	if x != nil && x.GuestsCanSeeOtherGuests != nil {
+		return *x.GuestsCanSeeOtherGuests
+	}
+	return false
+}
+
+func (x *UpdateEventRequest) GetGuestsCanModify() bool {
+	if x != nil && x.GuestsCanModify != nil {
+		return *x.GuestsCanModify
+	}
+	return false
+}
+
+func (x *UpdateEventRequest) GetGuestsCanInviteOthers() bool {
+	if x != nil && x.GuestsCanInviteOthers != nil {
+		return *x.GuestsCanInviteOthers
+	}
+	return false
+}
+
+func (x *UpdateEventRequest) GetSourceTitle() string {
+	if x != nil && x.SourceTitle != nil {
+		return *x.SourceTitle
+	}
+	return ""
+}
+
+func (x *UpdateEventRequest) GetSourceUrl() string {
+	if x != nil && x.SourceUrl != nil {
+		return *x.SourceUrl
+	}
+	return ""
+}
+
+func (x *UpdateEventRequest) GetBlocksTime() bool {
+	if x != nil && x.BlocksTime != nil {
+		return *x.BlocksTime
+	}
+	return false
+}
+
+type UpdateEventResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	HtmlLink      string                 `protobuf:"bytes,4,opt,name=html_link,json=htmlLink,proto3" json:"html_link,omitempty"`
+	CalendarId    string                 `protobuf:"bytes,5,opt,name=calendar_id,json=calendarId,proto3" json:"calendar_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateEventResponse) Reset() {
+	*x = UpdateEventResponse{}
+	mi := &file_calendar_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateEventResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateEventResponse) ProtoMessage() {}
+
+func (x *UpdateEventResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_calendar_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateEventResponse.ProtoReflect.Descriptor instead.
+func (*UpdateEventResponse) Descriptor() ([]byte, []int) {
+	return file_calendar_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *UpdateEventResponse) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
+}
+
+func (x *UpdateEventResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UpdateEventResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UpdateEventResponse) GetHtmlLink() string {
+	if x != nil {
+		return x.HtmlLink
+	}
+	return ""
+}
+
+func (x *UpdateEventResponse) GetCalendarId() string {
+	if x != nil {
+		return x.CalendarId
+	}
+	return ""
+}
+
+type DeleteEventRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	CalendarId    *string                `protobuf:"bytes,2,opt,name=calendar_id,json=calendarId,proto3,oneof" json:"calendar_id,omitempty"` // defaults to "primary"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteEventRequest) Reset() {
+	*x = DeleteEventRequest{}
+	mi := &file_calendar_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteEventRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteEventRequest) ProtoMessage() {}
+
+func (x *DeleteEventRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_calendar_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteEventRequest.ProtoReflect.Descriptor instead.
+func (*DeleteEventRequest) Descriptor() ([]byte, []int) {
+	return file_calendar_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DeleteEventRequest) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
+}
+
+func (x *DeleteEventRequest) GetCalendarId() string {
+	if x != nil && x.CalendarId != nil {
+		return *x.CalendarId
+	}
+	return ""
+}
+
+type DeleteEventResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	CalendarId    string                 `protobuf:"bytes,3,opt,name=calendar_id,json=calendarId,proto3" json:"calendar_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteEventResponse) Reset() {
+	*x = DeleteEventResponse{}
+	mi := &file_calendar_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteEventResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteEventResponse) ProtoMessage() {}
+
+func (x *DeleteEventResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_calendar_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteEventResponse.ProtoReflect.Descriptor instead.
+func (*DeleteEventResponse) Descriptor() ([]byte, []int) {
+	return file_calendar_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DeleteEventResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *DeleteEventResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *DeleteEventResponse) GetCalendarId() string {
+	if x != nil {
+		return x.CalendarId
+	}
+	return ""
+}
+
+type ListEventsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CalendarId    *string                `protobuf:"bytes,1,opt,name=calendar_id,json=calendarId,proto3,oneof" json:"calendar_id,omitempty"` // defaults to "primary"
+	After         *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=after,proto3,oneof" json:"after,omitempty"`                             // only events after this time
+	Before        *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=before,proto3,oneof" json:"before,omitempty"`                           // only events before this time
+	Limit         *int32                 `protobuf:"varint,4,opt,name=limit,proto3,oneof" json:"limit,omitempty"`                            // maximum number of events to return
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListEventsRequest) Reset() {
+	*x = ListEventsRequest{}
+	mi := &file_calendar_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListEventsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListEventsRequest) ProtoMessage() {}
+
+func (x *ListEventsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_calendar_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListEventsRequest.ProtoReflect.Descriptor instead.
+func (*ListEventsRequest) Descriptor() ([]byte, []int) {
+	return file_calendar_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ListEventsRequest) GetCalendarId() string {
+	if x != nil && x.CalendarId != nil {
+		return *x.CalendarId
+	}
+	return ""
+}
+
+func (x *ListEventsRequest) GetAfter() *timestamppb.Timestamp {
+	if x != nil {
+		return x.After
+	}
+	return nil
+}
+
+func (x *ListEventsRequest) GetBefore() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Before
+	}
+	return nil
+}
+
+func (x *ListEventsRequest) GetLimit() int32 {
+	if x != nil && x.Limit != nil {
+		return *x.Limit
+	}
+	return 0
+}
+
+type Event struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Summary       string                 `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
+	Description   *string                `protobuf:"bytes,3,opt,name=description,proto3,oneof" json:"description,omitempty"`
+	StartTime     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=start_time,json=startTime,proto3,oneof" json:"start_time,omitempty"`
+	EndTime       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=end_time,json=endTime,proto3,oneof" json:"end_time,omitempty"`
+	Location      *string                `protobuf:"bytes,6,opt,name=location,proto3,oneof" json:"location,omitempty"`
+	HtmlLink      string                 `protobuf:"bytes,7,opt,name=html_link,json=htmlLink,proto3" json:"html_link,omitempty"`
+	CalendarId    string                 `protobuf:"bytes,8,opt,name=calendar_id,json=calendarId,proto3" json:"calendar_id,omitempty"`
+	Status        *string                `protobuf:"bytes,9,opt,name=status,proto3,oneof" json:"status,omitempty"` // confirmed, tentative, cancelled
+	Attendees     []string               `protobuf:"bytes,10,rep,name=attendees,proto3" json:"attendees,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Event) Reset() {
+	*x = Event{}
+	mi := &file_calendar_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Event) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Event) ProtoMessage() {}
+
+func (x *Event) ProtoReflect() protoreflect.Message {
+	mi := &file_calendar_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Event.ProtoReflect.Descriptor instead.
+func (*Event) Descriptor() ([]byte, []int) {
+	return file_calendar_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *Event) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Event) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *Event) GetDescription() string {
+	if x != nil && x.Description != nil {
+		return *x.Description
+	}
+	return ""
+}
+
+func (x *Event) GetStartTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTime
+	}
+	return nil
+}
+
+func (x *Event) GetEndTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTime
+	}
+	return nil
+}
+
+func (x *Event) GetLocation() string {
+	if x != nil && x.Location != nil {
+		return *x.Location
+	}
+	return ""
+}
+
+func (x *Event) GetHtmlLink() string {
+	if x != nil {
+		return x.HtmlLink
+	}
+	return ""
+}
+
+func (x *Event) GetCalendarId() string {
+	if x != nil {
+		return x.CalendarId
+	}
+	return ""
+}
+
+func (x *Event) GetStatus() string {
+	if x != nil && x.Status != nil {
+		return *x.Status
+	}
+	return ""
+}
+
+func (x *Event) GetAttendees() []string {
+	if x != nil {
+		return x.Attendees
+	}
+	return nil
+}
+
+var File_calendar_proto protoreflect.FileDescriptor
+
+const file_calendar_proto_rawDesc = "" +
 	"\n" +
-	"\x14proto/calendar.proto\x12\bcalendar\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf8\x01\n" +
-	"\x0fAddEventRequest\x12\x14\n" +
-	"\x05title\x18\x01 \x01(\tR\x05title\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\x129\n" +
+	"\x0ecalendar.proto\x12\bcalendar\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16proto/cli/v1/cli.proto\"\xc7\x06\n" +
+	"\x0fAddEventRequest\x12\x18\n" +
+	"\asummary\x18\x01 \x01(\tR\asummary\x12%\n" +
+	"\vdescription\x18\x02 \x01(\tH\x00R\vdescription\x88\x01\x01\x12>\n" +
 	"\n" +
-	"start_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tstartTime\x125\n" +
-	"\bend_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\aendTime\x12\x1a\n" +
-	"\blocation\x18\x05 \x01(\tR\blocation\x12\x1f\n" +
-	"\vcalendar_id\x18\x06 \x01(\tR\n" +
-	"calendarId\"\x9f\x01\n" +
+	"start_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tstartTime\x88\x01\x01\x12:\n" +
+	"\bend_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampH\x02R\aendTime\x88\x01\x01\x12\x1f\n" +
+	"\blocation\x18\x05 \x01(\tH\x03R\blocation\x88\x01\x01\x12$\n" +
+	"\vcalendar_id\x18\x06 \x01(\tH\x04R\n" +
+	"calendarId\x88\x01\x01\x12A\n" +
+	"\x1bguests_can_see_other_guests\x18\a \x01(\bH\x05R\x17guestsCanSeeOtherGuests\x88\x01\x01\x12/\n" +
+	"\x11guests_can_modify\x18\b \x01(\bH\x06R\x0fguestsCanModify\x88\x01\x01\x12<\n" +
+	"\x18guests_can_invite_others\x18\t \x01(\bH\aR\x15guestsCanInviteOthers\x88\x01\x01\x12,\n" +
+	"\x0fidempotency_key\x18\n" +
+	" \x01(\tH\bR\x0eidempotencyKey\x88\x01\x01\x12&\n" +
+	"\fsource_title\x18\v \x01(\tH\tR\vsourceTitle\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"source_url\x18\f \x01(\tH\n" +
+	"R\tsourceUrl\x88\x01\x01\x12$\n" +
+	"\vblocks_time\x18\r \x01(\bH\vR\n" +
+	"blocksTime\x88\x01\x01B\x0e\n" +
+	"\f_descriptionB\r\n" +
+	"\v_start_timeB\v\n" +
+	"\t_end_timeB\v\n" +
+	"\t_locationB\x0e\n" +
+	"\f_calendar_idB\x1e\n" +
+	"\x1c_guests_can_see_other_guestsB\x14\n" +
+	"\x12_guests_can_modifyB\x1b\n" +
+	"\x19_guests_can_invite_othersB\x12\n" +
+	"\x10_idempotency_keyB\x0f\n" +
+	"\r_source_titleB\r\n" +
+	"\v_source_urlB\x0e\n" +
+	"\f_blocks_time\"\x9f\x01\n" +
 	"\x10AddEventResponse\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1b\n" +
 	"\thtml_link\x18\x04 \x01(\tR\bhtmlLink\x12\x1f\n" +
 	"\vcalendar_id\x18\x05 \x01(\tR\n" +
-	"calendarId2T\n" +
+	"calendarId\"\xb4\x06\n" +
+	"\x12UpdateEventRequest\x12\x19\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12$\n" +
+	"\vcalendar_id\x18\x02 \x01(\tH\x00R\n" +
+	"calendarId\x88\x01\x01\x12\x1d\n" +
+	"\asummary\x18\x03 \x01(\tH\x01R\asummary\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\x04 \x01(\tH\x02R\vdescription\x88\x01\x01\x12>\n" +
+	"\n" +
+	"start_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampH\x03R\tstartTime\x88\x01\x01\x12:\n" +
+	"\bend_time\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampH\x04R\aendTime\x88\x01\x01\x12\x1f\n" +
+	"\blocation\x18\a \x01(\tH\x05R\blocation\x88\x01\x01\x12A\n" +
+	"\x1bguests_can_see_other_guests\x18\b \x01(\bH\x06R\x17guestsCanSeeOtherGuests\x88\x01\x01\x12/\n" +
+	"\x11guests_can_modify\x18\t \x01(\bH\aR\x0fguestsCanModify\x88\x01\x01\x12<\n" +
+	"\x18guests_can_invite_others\x18\n" +
+	" \x01(\bH\bR\x15guestsCanInviteOthers\x88\x01\x01\x12&\n" +
+	"\fsource_title\x18\v \x01(\tH\tR\vsourceTitle\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"source_url\x18\f \x01(\tH\n" +
+	"R\tsourceUrl\x88\x01\x01\x12$\n" +
+	"\vblocks_time\x18\r \x01(\bH\vR\n" +
+	"blocksTime\x88\x01\x01B\x0e\n" +
+	"\f_calendar_idB\n" +
+	"\n" +
+	"\b_summaryB\x0e\n" +
+	"\f_descriptionB\r\n" +
+	"\v_start_timeB\v\n" +
+	"\t_end_timeB\v\n" +
+	"\t_locationB\x1e\n" +
+	"\x1c_guests_can_see_other_guestsB\x14\n" +
+	"\x12_guests_can_modifyB\x1b\n" +
+	"\x19_guests_can_invite_othersB\x0f\n" +
+	"\r_source_titleB\r\n" +
+	"\v_source_urlB\x0e\n" +
+	"\f_blocks_time\"\xa2\x01\n" +
+	"\x13UpdateEventResponse\x12\x19\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1b\n" +
+	"\thtml_link\x18\x04 \x01(\tR\bhtmlLink\x12\x1f\n" +
+	"\vcalendar_id\x18\x05 \x01(\tR\n" +
+	"calendarId\"e\n" +
+	"\x12DeleteEventRequest\x12\x19\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12$\n" +
+	"\vcalendar_id\x18\x02 \x01(\tH\x00R\n" +
+	"calendarId\x88\x01\x01B\x0e\n" +
+	"\f_calendar_id\"j\n" +
+	"\x13DeleteEventResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
+	"\vcalendar_id\x18\x03 \x01(\tR\n" +
+	"calendarId\"\xf3\x01\n" +
+	"\x11ListEventsRequest\x12$\n" +
+	"\vcalendar_id\x18\x01 \x01(\tH\x00R\n" +
+	"calendarId\x88\x01\x01\x125\n" +
+	"\x05after\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\x05after\x88\x01\x01\x127\n" +
+	"\x06before\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampH\x02R\x06before\x88\x01\x01\x12\x19\n" +
+	"\x05limit\x18\x04 \x01(\x05H\x03R\x05limit\x88\x01\x01B\x0e\n" +
+	"\f_calendar_idB\b\n" +
+	"\x06_afterB\t\n" +
+	"\a_beforeB\b\n" +
+	"\x06_limit\"\xb2\x03\n" +
+	"\x05Event\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\asummary\x18\x02 \x01(\tR\asummary\x12%\n" +
+	"\vdescription\x18\x03 \x01(\tH\x00R\vdescription\x88\x01\x01\x12>\n" +
+	"\n" +
+	"start_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tstartTime\x88\x01\x01\x12:\n" +
+	"\bend_time\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampH\x02R\aendTime\x88\x01\x01\x12\x1f\n" +
+	"\blocation\x18\x06 \x01(\tH\x03R\blocation\x88\x01\x01\x12\x1b\n" +
+	"\thtml_link\x18\a \x01(\tR\bhtmlLink\x12\x1f\n" +
+	"\vcalendar_id\x18\b \x01(\tR\n" +
+	"calendarId\x12\x1b\n" +
+	"\x06status\x18\t \x01(\tH\x04R\x06status\x88\x01\x01\x12\x1c\n" +
+	"\tattendees\x18\n" +
+	" \x03(\tR\tattendeesB\x0e\n" +
+	"\f_descriptionB\r\n" +
+	"\v_start_timeB\v\n" +
+	"\t_end_timeB\v\n" +
+	"\t_locationB\t\n" +
+	"\a_status2\xaa\x02\n" +
 	"\x0fCalendarService\x12A\n" +
-	"\bAddEvent\x12\x19.calendar.AddEventRequest\x1a\x1a.calendar.AddEventResponseB}\n" +
-	"\fcom.calendarB\rCalendarProtoP\x01Z\x1egithub.com/drewfead/cali/proto\xa2\x02\x03CXX\xaa\x02\bCalendar\xca\x02\bCalendar\xe2\x02\x14Calendar\\GPBMetadata\xea\x02\bCalendarb\x06proto3"
+	"\bAddEvent\x12\x19.calendar.AddEventRequest\x1a\x1a.calendar.AddEventResponse\x12J\n" +
+	"\vUpdateEvent\x12\x1c.calendar.UpdateEventRequest\x1a\x1d.calendar.UpdateEventResponse\x12J\n" +
+	"\vDeleteEvent\x12\x1c.calendar.DeleteEventRequest\x1a\x1d.calendar.DeleteEventResponse\x12<\n" +
+	"\n" +
+	"ListEvents\x12\x1b.calendar.ListEventsRequest\x1a\x0f.calendar.Event0\x01B Z\x1egithub.com/drewfead/cali/protob\x06proto3"
 
 var (
-	file_proto_calendar_proto_rawDescOnce sync.Once
-	file_proto_calendar_proto_rawDescData []byte
+	file_calendar_proto_rawDescOnce sync.Once
+	file_calendar_proto_rawDescData []byte
 )
 
-func file_proto_calendar_proto_rawDescGZIP() []byte {
-	file_proto_calendar_proto_rawDescOnce.Do(func() {
-		file_proto_calendar_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_calendar_proto_rawDesc), len(file_proto_calendar_proto_rawDesc)))
+func file_calendar_proto_rawDescGZIP() []byte {
+	file_calendar_proto_rawDescOnce.Do(func() {
+		file_calendar_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_calendar_proto_rawDesc), len(file_calendar_proto_rawDesc)))
 	})
-	return file_proto_calendar_proto_rawDescData
+	return file_calendar_proto_rawDescData
 }
 
-var file_proto_calendar_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_proto_calendar_proto_goTypes = []any{
+var file_calendar_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_calendar_proto_goTypes = []any{
 	(*AddEventRequest)(nil),       // 0: calendar.AddEventRequest
 	(*AddEventResponse)(nil),      // 1: calendar.AddEventResponse
-	(*timestamppb.Timestamp)(nil), // 2: google.protobuf.Timestamp
+	(*UpdateEventRequest)(nil),    // 2: calendar.UpdateEventRequest
+	(*UpdateEventResponse)(nil),   // 3: calendar.UpdateEventResponse
+	(*DeleteEventRequest)(nil),    // 4: calendar.DeleteEventRequest
+	(*DeleteEventResponse)(nil),   // 5: calendar.DeleteEventResponse
+	(*ListEventsRequest)(nil),     // 6: calendar.ListEventsRequest
+	(*Event)(nil),                 // 7: calendar.Event
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
-var file_proto_calendar_proto_depIdxs = []int32{
-	2, // 0: calendar.AddEventRequest.start_time:type_name -> google.protobuf.Timestamp
-	2, // 1: calendar.AddEventRequest.end_time:type_name -> google.protobuf.Timestamp
-	0, // 2: calendar.CalendarService.AddEvent:input_type -> calendar.AddEventRequest
-	1, // 3: calendar.CalendarService.AddEvent:output_type -> calendar.AddEventResponse
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+var file_calendar_proto_depIdxs = []int32{
+	8,  // 0: calendar.AddEventRequest.start_time:type_name -> google.protobuf.Timestamp
+	8,  // 1: calendar.AddEventRequest.end_time:type_name -> google.protobuf.Timestamp
+	8,  // 2: calendar.UpdateEventRequest.start_time:type_name -> google.protobuf.Timestamp
+	8,  // 3: calendar.UpdateEventRequest.end_time:type_name -> google.protobuf.Timestamp
+	8,  // 4: calendar.ListEventsRequest.after:type_name -> google.protobuf.Timestamp
+	8,  // 5: calendar.ListEventsRequest.before:type_name -> google.protobuf.Timestamp
+	8,  // 6: calendar.Event.start_time:type_name -> google.protobuf.Timestamp
+	8,  // 7: calendar.Event.end_time:type_name -> google.protobuf.Timestamp
+	0,  // 8: calendar.CalendarService.AddEvent:input_type -> calendar.AddEventRequest
+	2,  // 9: calendar.CalendarService.UpdateEvent:input_type -> calendar.UpdateEventRequest
+	4,  // 10: calendar.CalendarService.DeleteEvent:input_type -> calendar.DeleteEventRequest
+	6,  // 11: calendar.CalendarService.ListEvents:input_type -> calendar.ListEventsRequest
+	1,  // 12: calendar.CalendarService.AddEvent:output_type -> calendar.AddEventResponse
+	3,  // 13: calendar.CalendarService.UpdateEvent:output_type -> calendar.UpdateEventResponse
+	5,  // 14: calendar.CalendarService.DeleteEvent:output_type -> calendar.DeleteEventResponse
+	7,  // 15: calendar.CalendarService.ListEvents:output_type -> calendar.Event
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
-func init() { file_proto_calendar_proto_init() }
-func file_proto_calendar_proto_init() {
-	if File_proto_calendar_proto != nil {
+func init() { file_calendar_proto_init() }
+func file_calendar_proto_init() {
+	if File_calendar_proto != nil {
 		return
 	}
+	file_calendar_proto_msgTypes[0].OneofWrappers = []any{}
+	file_calendar_proto_msgTypes[2].OneofWrappers = []any{}
+	file_calendar_proto_msgTypes[4].OneofWrappers = []any{}
+	file_calendar_proto_msgTypes[6].OneofWrappers = []any{}
+	file_calendar_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_calendar_proto_rawDesc), len(file_proto_calendar_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_calendar_proto_rawDesc), len(file_calendar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_calendar_proto_goTypes,
-		DependencyIndexes: file_proto_calendar_proto_depIdxs,
-		MessageInfos:      file_proto_calendar_proto_msgTypes,
+		GoTypes:           file_calendar_proto_goTypes,
+		DependencyIndexes: file_calendar_proto_depIdxs,
+		MessageInfos:      file_calendar_proto_msgTypes,
 	}.Build()
-	File_proto_calendar_proto = out.File
-	file_proto_calendar_proto_goTypes = nil
-	file_proto_calendar_proto_depIdxs = nil
+	File_calendar_proto = out.File
+	file_calendar_proto_goTypes = nil
+	file_calendar_proto_depIdxs = nil
 }

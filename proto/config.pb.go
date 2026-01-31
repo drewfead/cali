@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: proto/config.proto
+// source: config.proto
 
 package proto
 
@@ -28,13 +28,15 @@ type CaliConfig struct {
 	Auth *AuthConfig `protobuf:"bytes,1,opt,name=auth,proto3" json:"auth,omitempty"`
 	// Default calendar ID to use when not specified
 	DefaultCalendarId string `protobuf:"bytes,2,opt,name=default_calendar_id,json=defaultCalendarId,proto3" json:"default_calendar_id,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// API endpoint override (for testing with mock servers)
+	ApiEndpoint   string `protobuf:"bytes,3,opt,name=api_endpoint,json=apiEndpoint,proto3" json:"api_endpoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CaliConfig) Reset() {
 	*x = CaliConfig{}
-	mi := &file_proto_config_proto_msgTypes[0]
+	mi := &file_config_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +48,7 @@ func (x *CaliConfig) String() string {
 func (*CaliConfig) ProtoMessage() {}
 
 func (x *CaliConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_config_proto_msgTypes[0]
+	mi := &file_config_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +61,7 @@ func (x *CaliConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaliConfig.ProtoReflect.Descriptor instead.
 func (*CaliConfig) Descriptor() ([]byte, []int) {
-	return file_proto_config_proto_rawDescGZIP(), []int{0}
+	return file_config_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CaliConfig) GetAuth() *AuthConfig {
@@ -72,6 +74,13 @@ func (x *CaliConfig) GetAuth() *AuthConfig {
 func (x *CaliConfig) GetDefaultCalendarId() string {
 	if x != nil {
 		return x.DefaultCalendarId
+	}
+	return ""
+}
+
+func (x *CaliConfig) GetApiEndpoint() string {
+	if x != nil {
+		return x.ApiEndpoint
 	}
 	return ""
 }
@@ -91,7 +100,7 @@ type AuthConfig struct {
 
 func (x *AuthConfig) Reset() {
 	*x = AuthConfig{}
-	mi := &file_proto_config_proto_msgTypes[1]
+	mi := &file_config_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -103,7 +112,7 @@ func (x *AuthConfig) String() string {
 func (*AuthConfig) ProtoMessage() {}
 
 func (x *AuthConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_config_proto_msgTypes[1]
+	mi := &file_config_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -116,7 +125,7 @@ func (x *AuthConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthConfig.ProtoReflect.Descriptor instead.
 func (*AuthConfig) Descriptor() ([]byte, []int) {
-	return file_proto_config_proto_rawDescGZIP(), []int{1}
+	return file_config_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *AuthConfig) GetServiceAccount() *ServiceAccountCredentials {
@@ -160,7 +169,7 @@ type ServiceAccountCredentials struct {
 
 func (x *ServiceAccountCredentials) Reset() {
 	*x = ServiceAccountCredentials{}
-	mi := &file_proto_config_proto_msgTypes[2]
+	mi := &file_config_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -172,7 +181,7 @@ func (x *ServiceAccountCredentials) String() string {
 func (*ServiceAccountCredentials) ProtoMessage() {}
 
 func (x *ServiceAccountCredentials) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_config_proto_msgTypes[2]
+	mi := &file_config_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -185,7 +194,7 @@ func (x *ServiceAccountCredentials) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceAccountCredentials.ProtoReflect.Descriptor instead.
 func (*ServiceAccountCredentials) Descriptor() ([]byte, []int) {
-	return file_proto_config_proto_rawDescGZIP(), []int{2}
+	return file_config_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ServiceAccountCredentials) GetType() string {
@@ -275,7 +284,7 @@ type OAuthClientCredentials struct {
 
 func (x *OAuthClientCredentials) Reset() {
 	*x = OAuthClientCredentials{}
-	mi := &file_proto_config_proto_msgTypes[3]
+	mi := &file_config_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -287,7 +296,7 @@ func (x *OAuthClientCredentials) String() string {
 func (*OAuthClientCredentials) ProtoMessage() {}
 
 func (x *OAuthClientCredentials) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_config_proto_msgTypes[3]
+	mi := &file_config_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -300,7 +309,7 @@ func (x *OAuthClientCredentials) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OAuthClientCredentials.ProtoReflect.Descriptor instead.
 func (*OAuthClientCredentials) Descriptor() ([]byte, []int) {
-	return file_proto_config_proto_rawDescGZIP(), []int{3}
+	return file_config_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *OAuthClientCredentials) GetClientId() string {
@@ -352,15 +361,16 @@ func (x *OAuthClientCredentials) GetRedirectUris() []string {
 	return nil
 }
 
-var File_proto_config_proto protoreflect.FileDescriptor
+var File_config_proto protoreflect.FileDescriptor
 
-const file_proto_config_proto_rawDesc = "" +
+const file_config_proto_rawDesc = "" +
 	"\n" +
-	"\x12proto/config.proto\x12\bcalendar\"f\n" +
+	"\fconfig.proto\x12\bcalendar\"\x89\x01\n" +
 	"\n" +
 	"CaliConfig\x12(\n" +
 	"\x04auth\x18\x01 \x01(\v2\x14.calendar.AuthConfigR\x04auth\x12.\n" +
-	"\x13default_calendar_id\x18\x02 \x01(\tR\x11defaultCalendarId\"\xc9\x01\n" +
+	"\x13default_calendar_id\x18\x02 \x01(\tR\x11defaultCalendarId\x12!\n" +
+	"\fapi_endpoint\x18\x03 \x01(\tR\vapiEndpoint\"\xc9\x01\n" +
 	"\n" +
 	"AuthConfig\x12L\n" +
 	"\x0fservice_account\x18\x01 \x01(\v2#.calendar.ServiceAccountCredentialsR\x0eserviceAccount\x12C\n" +
@@ -388,29 +398,28 @@ const file_proto_config_proto_rawDesc = "" +
 	"\bauth_uri\x18\x04 \x01(\tR\aauthUri\x12\x1b\n" +
 	"\ttoken_uri\x18\x05 \x01(\tR\btokenUri\x12<\n" +
 	"\x1bauth_provider_x509_cert_url\x18\x06 \x01(\tR\x17authProviderX509CertUrl\x12#\n" +
-	"\rredirect_uris\x18\a \x03(\tR\fredirectUrisB{\n" +
-	"\fcom.calendarB\vConfigProtoP\x01Z\x1egithub.com/drewfead/cali/proto\xa2\x02\x03CXX\xaa\x02\bCalendar\xca\x02\bCalendar\xe2\x02\x14Calendar\\GPBMetadata\xea\x02\bCalendarb\x06proto3"
+	"\rredirect_uris\x18\a \x03(\tR\fredirectUrisB Z\x1egithub.com/drewfead/cali/protob\x06proto3"
 
 var (
-	file_proto_config_proto_rawDescOnce sync.Once
-	file_proto_config_proto_rawDescData []byte
+	file_config_proto_rawDescOnce sync.Once
+	file_config_proto_rawDescData []byte
 )
 
-func file_proto_config_proto_rawDescGZIP() []byte {
-	file_proto_config_proto_rawDescOnce.Do(func() {
-		file_proto_config_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_config_proto_rawDesc), len(file_proto_config_proto_rawDesc)))
+func file_config_proto_rawDescGZIP() []byte {
+	file_config_proto_rawDescOnce.Do(func() {
+		file_config_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_config_proto_rawDesc), len(file_config_proto_rawDesc)))
 	})
-	return file_proto_config_proto_rawDescData
+	return file_config_proto_rawDescData
 }
 
-var file_proto_config_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
-var file_proto_config_proto_goTypes = []any{
+var file_config_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_config_proto_goTypes = []any{
 	(*CaliConfig)(nil),                // 0: calendar.CaliConfig
 	(*AuthConfig)(nil),                // 1: calendar.AuthConfig
 	(*ServiceAccountCredentials)(nil), // 2: calendar.ServiceAccountCredentials
 	(*OAuthClientCredentials)(nil),    // 3: calendar.OAuthClientCredentials
 }
-var file_proto_config_proto_depIdxs = []int32{
+var file_config_proto_depIdxs = []int32{
 	1, // 0: calendar.CaliConfig.auth:type_name -> calendar.AuthConfig
 	2, // 1: calendar.AuthConfig.service_account:type_name -> calendar.ServiceAccountCredentials
 	3, // 2: calendar.AuthConfig.oauth_client:type_name -> calendar.OAuthClientCredentials
@@ -421,26 +430,26 @@ var file_proto_config_proto_depIdxs = []int32{
 	0, // [0:3] is the sub-list for field type_name
 }
 
-func init() { file_proto_config_proto_init() }
-func file_proto_config_proto_init() {
-	if File_proto_config_proto != nil {
+func init() { file_config_proto_init() }
+func file_config_proto_init() {
+	if File_config_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_config_proto_rawDesc), len(file_proto_config_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_config_proto_rawDesc), len(file_config_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_proto_config_proto_goTypes,
-		DependencyIndexes: file_proto_config_proto_depIdxs,
-		MessageInfos:      file_proto_config_proto_msgTypes,
+		GoTypes:           file_config_proto_goTypes,
+		DependencyIndexes: file_config_proto_depIdxs,
+		MessageInfos:      file_config_proto_msgTypes,
 	}.Build()
-	File_proto_config_proto = out.File
-	file_proto_config_proto_goTypes = nil
-	file_proto_config_proto_depIdxs = nil
+	File_config_proto = out.File
+	file_config_proto_goTypes = nil
+	file_config_proto_depIdxs = nil
 }

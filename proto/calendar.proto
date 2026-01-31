@@ -5,19 +5,36 @@ package calendar;
 option go_package = "github.com/drewfead/cali/proto";
 
 import "google/protobuf/timestamp.proto";
+import "proto/cli/v1/cli.proto";
 
 service CalendarService {
   // AddEvent adds a one-time calendar event
   rpc AddEvent(AddEventRequest) returns (AddEventResponse);
+
+  // UpdateEvent updates an existing calendar event
+  rpc UpdateEvent(UpdateEventRequest) returns (UpdateEventResponse);
+
+  // DeleteEvent removes a calendar event
+  rpc DeleteEvent(DeleteEventRequest) returns (DeleteEventResponse);
+
+  // ListEvents streams all events from a calendar
+  rpc ListEvents(ListEventsRequest) returns (stream Event);
 }
 
 message AddEventRequest {
-  string title = 1;
-  string description = 2;
-  google.protobuf.Timestamp start_time = 3;
-  google.protobuf.Timestamp end_time = 4;
-  string location = 5;
-  string calendar_id = 6;  // defaults to "primary"
+  string summary = 1;
+  optional string description = 2;  // supports HTML
+  optional google.protobuf.Timestamp start_time = 3;
+  optional google.protobuf.Timestamp end_time = 4;
+  optional string location = 5;
+  optional string calendar_id = 6;  // defaults to "primary"
+  optional bool guests_can_see_other_guests = 7;  // default false
+  optional bool guests_can_modify = 8;  // default false
+  optional bool guests_can_invite_others = 9;  // default false
+  optional string idempotency_key = 10;  // used to set event ID for deduplication
+  optional string source_title = 11;  // title of the source of the event
+  optional string source_url = 12;  // URL for the source of the event
+  optional bool blocks_time = 13;  // default false (transparent), true means opaque
 }
 
 message AddEventResponse {
@@ -26,4 +43,59 @@ message AddEventResponse {
   string message = 3;
   string html_link = 4;     // Link to view in Google Calendar
   string calendar_id = 5;   // Which calendar was used
+}
+
+message UpdateEventRequest {
+  string event_id = 1;
+  optional string calendar_id = 2;  // defaults to "primary"
+  optional string summary = 3;
+  optional string description = 4;  // supports HTML
+  optional google.protobuf.Timestamp start_time = 5;
+  optional google.protobuf.Timestamp end_time = 6;
+  optional string location = 7;
+  optional bool guests_can_see_other_guests = 8;
+  optional bool guests_can_modify = 9;
+  optional bool guests_can_invite_others = 10;
+  optional string source_title = 11;
+  optional string source_url = 12;
+  optional bool blocks_time = 13;
+}
+
+message UpdateEventResponse {
+  string event_id = 1;
+  bool success = 2;
+  string message = 3;
+  string html_link = 4;
+  string calendar_id = 5;
+}
+
+message DeleteEventRequest {
+  string event_id = 1;
+  optional string calendar_id = 2;  // defaults to "primary"
+}
+
+message DeleteEventResponse {
+  bool success = 1;
+  string message = 2;
+  string calendar_id = 3;
+}
+
+message ListEventsRequest {
+  optional string calendar_id = 1;  // defaults to "primary"
+  optional google.protobuf.Timestamp after = 2;  // only events after this time
+  optional google.protobuf.Timestamp before = 3;  // only events before this time
+  optional int32 limit = 4;  // maximum number of events to return
+}
+
+message Event {
+  string id = 1;
+  string summary = 2;
+  optional string description = 3;
+  optional google.protobuf.Timestamp start_time = 4;
+  optional google.protobuf.Timestamp end_time = 5;
+  optional string location = 6;
+  string html_link = 7;
+  string calendar_id = 8;
+  optional string status = 9;  // confirmed, tentative, cancelled
+  repeated string attendees = 10;
 }

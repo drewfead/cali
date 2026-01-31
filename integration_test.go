@@ -4,10 +4,16 @@ import (
 	"context"
 	"testing"
 
-	protocli "github.com/drewfead/proto-cli"
+	"github.com/drewfead/cali/pkg/googlecaltest"
 	"github.com/drewfead/cali/proto"
+	protocli "github.com/drewfead/proto-cli"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// ptr returns a pointer to the given value (helper for proto optional fields)
+func ptr[T any](v T) *T {
+	return &v
+}
 
 // loadTestConfig loads the configuration for integration tests
 func loadTestConfig(t *testing.T) *proto.CaliConfig {
@@ -27,28 +33,25 @@ func loadTestConfig(t *testing.T) *proto.CaliConfig {
 	return cfg
 }
 
-// TestIntegration_GoogleCalendarAPI tests the Google Calendar integration with real API calls.
-// This test is skipped by default because it requires credentials to be configured.
-//
-// To run this test:
-// 1. Set up OAuth credentials or service account (see AUTHENTICATION.md)
-// 2. Ensure ~/.config/cali/credentials.json OR ~/.config/cali/service-account.json exists
-// 3. Comment out the t.Skip() line below
-// 4. Run: go test -v -run TestIntegration_GoogleCalendarAPI
+// TestIntegration_GoogleCalendarAPI tests the Google Calendar integration using a mock server.
+// This test runs without requiring real Google Calendar credentials.
 func TestIntegration_GoogleCalendarAPI(t *testing.T) {
-	t.Skip("requires Google Calendar credentials - see AUTHENTICATION.md for setup")
+	// Create mock Google Calendar API server
+	mockServer := googlecaltest.NewServer()
+	defer mockServer.Close()
 
 	ctx := context.Background()
 
-	// Load configuration
+	// Load configuration and override API endpoint to point at mock
 	cfg := loadTestConfig(t)
+	cfg.ApiEndpoint = mockServer.URL
 
-	// Initialize service with real credentials
-	svc := newCalendarService(ctx, cfg)
+	// Initialize service
+	svc := newCalendarService(cfg)
 
-	// Skip if no calendar client was initialized (credentials not found)
-	if svc.calendarClient == nil {
-		t.Skip("Google Calendar client not initialized - credentials not found")
+	// Force initialization - should succeed with mock server
+	if err := svc.ensureInitialized(ctx); err != nil {
+		t.Fatalf("failed to initialize with mock server: %v", err)
 	}
 
 	tests := []struct {
@@ -60,27 +63,27 @@ func TestIntegration_GoogleCalendarAPI(t *testing.T) {
 		{
 			name: "create event with default times",
 			request: &proto.AddEventRequest{
-				Title:       "Integration Test Event",
-				Description: "This event was created by an automated integration test",
-				Location:    "Test Location",
+				Summary:     "Integration Test Event",
+				Description: ptr("This event was created by an automated integration test"),
+				Location:    ptr("Test Location"),
 			},
 			wantErr: false,
 		},
 		{
 			name: "create event with specific calendar ID",
 			request: &proto.AddEventRequest{
-				Title:       "Integration Test Event - Custom Calendar",
-				Description: "Testing with explicit calendar ID",
-				Location:    "Virtual",
-				CalendarId:  "primary",
+				Summary:     "Integration Test Event - Custom Calendar",
+				Description: ptr("Testing with explicit calendar ID"),
+				Location:    ptr("Virtual"),
+				CalendarId:  ptr("primary"),
 			},
 			wantErr: false,
 		},
 		{
 			name: "create event with explicit times",
 			request: &proto.AddEventRequest{
-				Title:       "Integration Test Event - With Times",
-				Description: "Testing with start and end times",
+				Summary:     "Integration Test Event - With Times",
+				Description: ptr("Testing with start and end times"),
 				StartTime:   timestamppb.Now(),
 				EndTime:     timestamppb.Now(),
 			},
@@ -89,11 +92,11 @@ func TestIntegration_GoogleCalendarAPI(t *testing.T) {
 		{
 			name: "create event on shared calendar",
 			request: &proto.AddEventRequest{
-				Title:       "Integration Test - Shared Calendar",
-				Description: "Testing service account with shared calendar",
-				Location:    "Automated",
+				Summary:     "Integration Test - Shared Calendar",
+				Description: ptr("Testing service account with shared calendar"),
+				Location:    ptr("Automated"),
 				// Update this calendar ID to match your test calendar
-				CalendarId: "77375caf1a9297541a0f25d2ce7cae6b7ac6b455232feb324c2610db6b6d7450@group.calendar.google.com",
+				CalendarId: ptr("77375caf1a9297541a0f25d2ce7cae6b7ac6b455232feb324c2610db6b6d7450@group.calendar.google.com"),
 			},
 			wantErr:    false,
 			skipReason: "requires calendar ID to be shared with service account",
@@ -105,6 +108,9 @@ func TestIntegration_GoogleCalendarAPI(t *testing.T) {
 			if tt.skipReason != "" {
 				t.Skip(tt.skipReason)
 			}
+
+			// Reset mock server state for each test
+			defer mockServer.Reset()
 
 			// Call AddEvent
 			resp, err := svc.AddEvent(ctx, tt.request)
@@ -161,19 +167,19 @@ func TestIntegration_ServiceAccountAuth(t *testing.T) {
 		t.Skip("service account not configured in config")
 	}
 
-	svc := newCalendarService(ctx, cfg)
+	svc := newCalendarService(cfg)
 
-	if svc.calendarClient == nil {
-		t.Fatal("expected calendar client to be initialized with service account")
+	// Force initialization
+	if err := svc.ensureInitialized(ctx); err != nil {
+		t.Fatal("expected calendar client to be initialized with service account: " + err.Error())
 	}
 
 	// Try creating a test event
 	resp, err := svc.AddEvent(ctx, &proto.AddEventRequest{
-		Title:       "Service Account Test Event",
-		Description: "Testing service account authentication",
-		Location:    "Automated Test",
+		Summary:     "Service Account Test Event",
+		Description: ptr("Testing service account authentication"),
+		Location:    ptr("Automated Test"),
 	})
-
 	if err != nil {
 		t.Fatalf("AddEvent() with service account failed: %v", err)
 	}
@@ -208,19 +214,19 @@ func TestIntegration_OAuthAuth(t *testing.T) {
 		cfg.Auth.ServiceAccount = originalServiceAccount
 	}()
 
-	svc := newCalendarService(ctx, cfg)
+	svc := newCalendarService(cfg)
 
-	if svc.calendarClient == nil {
-		t.Fatal("expected calendar client to be initialized with OAuth")
+	// Force initialization
+	if err := svc.ensureInitialized(ctx); err != nil {
+		t.Fatal("expected calendar client to be initialized with OAuth: " + err.Error())
 	}
 
 	// Try creating a test event
 	resp, err := svc.AddEvent(ctx, &proto.AddEventRequest{
-		Title:       "OAuth Test Event",
-		Description: "Testing OAuth user authentication",
-		Location:    "Interactive Test",
+		Summary:     "OAuth Test Event",
+		Description: ptr("Testing OAuth user authentication"),
+		Location:    ptr("Interactive Test"),
 	})
-
 	if err != nil {
 		t.Fatalf("AddEvent() with OAuth failed: %v", err)
 	}

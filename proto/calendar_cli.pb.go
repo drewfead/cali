@@ -9,22 +9,74 @@ import (
 	v3 "github.com/urfave/cli/v3"
 	grpc "google.golang.org/grpc"
 	insecure "google.golang.org/grpc/credentials/insecure"
+	metadata "google.golang.org/grpc/metadata"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	"io"
+	"log/slog"
 	"os"
+	"strings"
 )
 
-// getOutputWriter opens the specified output file or returns stdout
-func getOutputWriter(path string) (io.Writer, error) {
+// getOutputWriter opens the specified output file or returns cmd.Writer (if set) or stdout
+func getOutputWriter(cmd *v3.Command, path string) (io.Writer, error) {
 	if path == "-" || path == "" {
+		// Use cmd.Writer if set, otherwise try root command's Writer, otherwise stdout
+		if cmd.Writer != nil {
+			return cmd.Writer, nil
+		}
+		if cmd.Root().Writer != nil {
+			return cmd.Root().Writer, nil
+		}
 		return os.Stdout, nil
 	}
 	return os.Create(path)
 }
 
-// CalendarServiceServiceCommand creates a service CLI for CalendarService with options
+// localServerStream_ListEvents is a helper type for local server streaming calls to ListEvents
+type localServerStream_ListEvents struct {
+	ctx       context.Context
+	responses chan *Event
+	errors    chan error
+}
+
+func (s *localServerStream_ListEvents) Send(resp *Event) error {
+	select {
+	case s.responses <- resp:
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
+}
+
+func (s *localServerStream_ListEvents) Context() context.Context {
+	return s.ctx
+}
+
+func (s *localServerStream_ListEvents) SetHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *localServerStream_ListEvents) SendHeader(metadata.MD) error {
+	return nil
+}
+
+func (s *localServerStream_ListEvents) SetTrailer(metadata.MD) {}
+
+func (s *localServerStream_ListEvents) SendMsg(m any) error {
+	msg, ok := m.(*Event)
+	if !ok {
+		return fmt.Errorf("invalid message type: expected *%s, got %T", "Event", m)
+	}
+	return s.Send(msg)
+}
+
+func (s *localServerStream_ListEvents) RecvMsg(m any) error {
+	return fmt.Errorf("RecvMsg not supported on server streaming")
+}
+
+// CalendarServiceCommand creates a CLI for CalendarService with options
 // The implOrFactory parameter can be either a direct service implementation or a factory function
-func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{}, opts ...protocli.ServiceOption) *protocli.ServiceCLI {
+func CalendarServiceCommand(ctx context.Context, implOrFactory interface{}, opts ...protocli.ServiceOption) *protocli.ServiceCLI {
 	options := protocli.ApplyServiceOptions(opts...)
 
 	// Determine default format (first registered format, or empty if none)
@@ -50,8 +102,8 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 	}}
 
 	flags_add_event = append(flags_add_event, &v3.StringFlag{
-		Name:  "title",
-		Usage: "Title",
+		Name:  "summary",
+		Usage: "Summary",
 	})
 	flags_add_event = append(flags_add_event, &v3.StringFlag{
 		Name:  "description",
@@ -73,6 +125,34 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 		Name:  "calendar-id",
 		Usage: "CalendarId",
 	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "guests-can-see-other-guests",
+		Usage: "GuestsCanSeeOtherGuests",
+	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "guests-can-modify",
+		Usage: "GuestsCanModify",
+	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "guests-can-invite-others",
+		Usage: "GuestsCanInviteOthers",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "idempotency-key",
+		Usage: "IdempotencyKey",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "source-title",
+		Usage: "SourceTitle",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "source-url",
+		Usage: "SourceUrl",
+	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "blocks-time",
+		Usage: "BlocksTime",
+	})
 
 	// Add format-specific flags from registered formats
 	for _, outputFmt := range options.OutputFormats() {
@@ -84,19 +164,20 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 
 	commands = append(commands, &v3.Command{
 		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
-			if options.BeforeCommand() != nil {
-				if err := options.BeforeCommand()(cmdCtx, cmd); err != nil {
-					return fmt.Errorf("before hook failed: %w", err)
-				}
-			}
-
 			defer func() {
-				if options.AfterCommand() != nil {
-					if err := options.AfterCommand()(cmdCtx, cmd); err != nil {
-						fmt.Fprintf(os.Stderr, "after hook failed: %v\n", err)
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
 					}
 				}
 			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
 
 			// Build request message
 			var req *AddEventRequest
@@ -123,8 +204,11 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 			} else {
 				// Use auto-generated flag parsing
 				req = &AddEventRequest{}
-				req.Title = cmd.String("title")
-				req.Description = cmd.String("description")
+				req.Summary = cmd.String("summary")
+				if cmd.IsSet("description") {
+					val := cmd.String("description")
+					req.Description = &val
+				}
 				// Field StartTime: check for custom deserializer for google.protobuf.Timestamp
 				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
 					// Use custom deserializer for nested message
@@ -173,8 +257,42 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 					}
 					// No value provided - leave field as nil
 				}
-				req.Location = cmd.String("location")
-				req.CalendarId = cmd.String("calendar-id")
+				if cmd.IsSet("location") {
+					val := cmd.String("location")
+					req.Location = &val
+				}
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+				if cmd.IsSet("guests-can-see-other-guests") {
+					val := cmd.Bool("guests-can-see-other-guests")
+					req.GuestsCanSeeOtherGuests = &val
+				}
+				if cmd.IsSet("guests-can-modify") {
+					val := cmd.Bool("guests-can-modify")
+					req.GuestsCanModify = &val
+				}
+				if cmd.IsSet("guests-can-invite-others") {
+					val := cmd.Bool("guests-can-invite-others")
+					req.GuestsCanInviteOthers = &val
+				}
+				if cmd.IsSet("idempotency-key") {
+					val := cmd.String("idempotency-key")
+					req.IdempotencyKey = &val
+				}
+				if cmd.IsSet("source-title") {
+					val := cmd.String("source-title")
+					req.SourceTitle = &val
+				}
+				if cmd.IsSet("source-url") {
+					val := cmd.String("source-url")
+					req.SourceUrl = &val
+				}
+				if cmd.IsSet("blocks-time") {
+					val := cmd.Bool("blocks-time")
+					req.BlocksTime = &val
+				}
 			}
 
 			// Check if using remote gRPC call or direct implementation call
@@ -205,7 +323,7 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 			}
 
 			// Open output writer
-			outputWriter, err := getOutputWriter(cmd.String("output"))
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
 			if err != nil {
 				return fmt.Errorf("failed to open output: %w", err)
 			}
@@ -221,6 +339,10 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 				if outputFmt.Name() == formatName {
 					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
 						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
 					}
 					return nil
 				}
@@ -238,14 +360,718 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 		},
 		Flags: flags_add_event,
 		Name:  "add-event",
-		Usage: "Call AddEvent RPC",
+		Usage: "AddEvent",
+	})
+
+	// Build flags for update-event
+	flags_update_event := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}}
+
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "event-id",
+		Usage: "EventId",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "summary",
+		Usage: "Summary",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "description",
+		Usage: "Description",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "start-time",
+		Usage: "StartTime (google.protobuf.Timestamp)",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "end-time",
+		Usage: "EndTime (google.protobuf.Timestamp)",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "location",
+		Usage: "Location",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "guests-can-see-other-guests",
+		Usage: "GuestsCanSeeOtherGuests",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "guests-can-modify",
+		Usage: "GuestsCanModify",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "guests-can-invite-others",
+		Usage: "GuestsCanInviteOthers",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "source-title",
+		Usage: "SourceTitle",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "source-url",
+		Usage: "SourceUrl",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "blocks-time",
+		Usage: "BlocksTime",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_update_event = append(flags_update_event, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			// Build request message
+			var req *UpdateEventRequest
+
+			// Check for custom flag deserializer for calendar.UpdateEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.UpdateEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*UpdateEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "UpdateEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &UpdateEventRequest{}
+				req.EventId = cmd.String("event-id")
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+				if cmd.IsSet("summary") {
+					val := cmd.String("summary")
+					req.Summary = &val
+				}
+				if cmd.IsSet("description") {
+					val := cmd.String("description")
+					req.Description = &val
+				}
+				// Field StartTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: start-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "start-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field StartTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.StartTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("start-time") {
+						return fmt.Errorf("flag --start-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				// Field EndTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: end-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "end-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field EndTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.EndTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("end-time") {
+						return fmt.Errorf("flag --end-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				if cmd.IsSet("location") {
+					val := cmd.String("location")
+					req.Location = &val
+				}
+				if cmd.IsSet("guests-can-see-other-guests") {
+					val := cmd.Bool("guests-can-see-other-guests")
+					req.GuestsCanSeeOtherGuests = &val
+				}
+				if cmd.IsSet("guests-can-modify") {
+					val := cmd.Bool("guests-can-modify")
+					req.GuestsCanModify = &val
+				}
+				if cmd.IsSet("guests-can-invite-others") {
+					val := cmd.Bool("guests-can-invite-others")
+					req.GuestsCanInviteOthers = &val
+				}
+				if cmd.IsSet("source-title") {
+					val := cmd.String("source-title")
+					req.SourceTitle = &val
+				}
+				if cmd.IsSet("source-url") {
+					val := cmd.String("source-url")
+					req.SourceUrl = &val
+				}
+				if cmd.IsSet("blocks-time") {
+					val := cmd.Bool("blocks-time")
+					req.BlocksTime = &val
+				}
+			}
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+			var resp *UpdateEventResponse
+			var err error
+
+			if remoteAddr != "" {
+				// Remote gRPC call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				resp, err = client.UpdateEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("remote call failed: %w", err)
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.UpdateEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("method failed: %w", err)
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find and use the appropriate output format
+			formatName := cmd.String("format")
+
+			// Try registered formats
+			for _, outputFmt := range options.OutputFormats() {
+				if outputFmt.Name() == formatName {
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Format not found - build list of available formats
+			var availableFormats []string
+			for _, f := range options.OutputFormats() {
+				availableFormats = append(availableFormats, f.Name())
+			}
+			if len(availableFormats) == 0 {
+				return fmt.Errorf("no output formats registered (use WithOutputFormats to register formats)")
+			}
+			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+		},
+		Flags: flags_update_event,
+		Name:  "update-event",
+		Usage: "UpdateEvent",
+	})
+
+	// Build flags for delete-event
+	flags_delete_event := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}}
+
+	flags_delete_event = append(flags_delete_event, &v3.StringFlag{
+		Name:  "event-id",
+		Usage: "EventId",
+	})
+	flags_delete_event = append(flags_delete_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_delete_event = append(flags_delete_event, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			// Build request message
+			var req *DeleteEventRequest
+
+			// Check for custom flag deserializer for calendar.DeleteEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.DeleteEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*DeleteEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "DeleteEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &DeleteEventRequest{}
+				req.EventId = cmd.String("event-id")
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+			}
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+			var resp *DeleteEventResponse
+			var err error
+
+			if remoteAddr != "" {
+				// Remote gRPC call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				resp, err = client.DeleteEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("remote call failed: %w", err)
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.DeleteEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("method failed: %w", err)
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find and use the appropriate output format
+			formatName := cmd.String("format")
+
+			// Try registered formats
+			for _, outputFmt := range options.OutputFormats() {
+				if outputFmt.Name() == formatName {
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Format not found - build list of available formats
+			var availableFormats []string
+			for _, f := range options.OutputFormats() {
+				availableFormats = append(availableFormats, f.Name())
+			}
+			if len(availableFormats) == 0 {
+				return fmt.Errorf("no output formats registered (use WithOutputFormats to register formats)")
+			}
+			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+		},
+		Flags: flags_delete_event,
+		Name:  "delete-event",
+		Usage: "DeleteEvent",
+	})
+
+	// Build flags for list-events
+	flags_list_events := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}, &v3.StringFlag{
+		Name:  "delimiter",
+		Usage: "Delimiter between streamed messages",
+		Value: "\n",
+	}}
+
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "after",
+		Usage: "After (google.protobuf.Timestamp)",
+	})
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "before",
+		Usage: "Before (google.protobuf.Timestamp)",
+	})
+	flags_list_events = append(flags_list_events, &v3.Int32Flag{
+		Name:  "limit",
+		Usage: "Limit",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_list_events = append(flags_list_events, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			// Build request message
+			var req *ListEventsRequest
+
+			// Check for custom flag deserializer for calendar.ListEventsRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.ListEventsRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*ListEventsRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "ListEventsRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &ListEventsRequest{}
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+				// Field After: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: after
+					fieldFlags := protocli.NewFlagContainer(cmd, "after")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field After: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.After = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("after") {
+						return fmt.Errorf("flag --after requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				// Field Before: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: before
+					fieldFlags := protocli.NewFlagContainer(cmd, "before")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field Before: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.Before = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("before") {
+						return fmt.Errorf("flag --before requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				if cmd.IsSet("limit") {
+					val := cmd.Int32("limit")
+					req.Limit = &val
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find the appropriate output format
+			formatName := cmd.String("format")
+			var outputFmt protocli.OutputFormat
+			for _, f := range options.OutputFormats() {
+				if f.Name() == formatName {
+					outputFmt = f
+					break
+				}
+			}
+			if outputFmt == nil {
+				var availableFormats []string
+				for _, f := range options.OutputFormats() {
+					availableFormats = append(availableFormats, f.Name())
+				}
+				return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+			}
+
+			// Get delimiter for separating streamed messages
+			delimiter := cmd.String("delimiter")
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+
+			if remoteAddr != "" {
+				// Remote gRPC streaming call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				stream, err := client.ListEvents(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("failed to start stream: %w", err)
+				}
+
+				// Receive and format each message in the stream
+				var messageCount int
+				for {
+					msg, recvErr := stream.Recv()
+					if recvErr == io.EOF {
+						break
+					}
+					if recvErr != nil {
+						return fmt.Errorf("stream receive error: %w", recvErr)
+					}
+
+					// Format and write the message
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, msg); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+
+					// Write delimiter
+					if _, err := outputWriter.Write([]byte(delimiter)); err != nil {
+						return fmt.Errorf("failed to write delimiter: %w", err)
+					}
+					messageCount++
+				}
+
+				// Write final newline to keep terminal clean (only if delimiter doesn't already end with newline)
+				if messageCount > 0 && !strings.HasSuffix(delimiter, "\n") {
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+
+				// Create local stream wrapper for direct call
+				localStream := &localServerStream_ListEvents{
+					ctx:       cmdCtx,
+					errors:    make(chan error),
+					responses: make(chan *Event),
+				}
+
+				// Call streaming method in goroutine
+				go func() {
+					var methodErr error
+					methodErr = svcImpl.ListEvents(req, localStream)
+					close(localStream.responses)
+					if methodErr != nil {
+						localStream.errors <- methodErr
+					}
+					close(localStream.errors)
+				}()
+
+				// Receive and format each message in the stream
+				var messageCount int
+				for {
+					select {
+					case msg, ok := <-localStream.responses:
+						if !ok {
+							// Stream closed, check for errors
+							if streamErr := <-localStream.errors; streamErr != nil {
+								return fmt.Errorf("stream error: %w", streamErr)
+							}
+							// Write final newline to keep terminal clean (only if delimiter doesn't already end with newline)
+							if messageCount > 0 && !strings.HasSuffix(delimiter, "\n") {
+								if _, err := outputWriter.Write([]byte("\n")); err != nil {
+									return fmt.Errorf("failed to write final newline: %w", err)
+								}
+							}
+							return nil
+						}
+
+						// Format and write the message
+						if err := outputFmt.Format(cmdCtx, cmd, outputWriter, msg); err != nil {
+							return fmt.Errorf("format failed: %w", err)
+						}
+
+						// Write delimiter
+						if _, err := outputWriter.Write([]byte(delimiter)); err != nil {
+							return fmt.Errorf("failed to write delimiter: %w", err)
+						}
+						messageCount++
+					case <-cmdCtx.Done():
+						return cmdCtx.Err()
+					}
+				}
+			}
+
+			return nil
+		},
+		Flags: flags_list_events,
+		Name:  "list-events",
+		Usage: "ListEvents (streaming)",
 	})
 
 	return &protocli.ServiceCLI{
 		Command: &v3.Command{
 			Commands: commands,
 			Name:     "calendar-service",
-			Usage:    "CLI for CalendarService",
+			Usage:    "Calendar commands",
 		},
 		ConfigMessageType: "",
 		FactoryOrImpl:     implOrFactory,
@@ -254,4 +1080,1018 @@ func CalendarServiceServiceCommand(ctx context.Context, implOrFactory interface{
 		},
 		ServiceName: "calendar-service",
 	}
+}
+
+// CalendarServiceCommandsFlat creates a flat command structure for CalendarService (for single-service CLIs)
+// This returns RPC commands directly at the root level instead of nested under a service command.
+// The implOrFactory parameter can be either a direct service implementation or a factory function
+// The returned slice includes all RPC commands plus a daemonize command for starting a gRPC server.
+func CalendarServiceCommandsFlat(ctx context.Context, implOrFactory interface{}, opts ...protocli.ServiceOption) []*v3.Command {
+	options := protocli.ApplyServiceOptions(opts...)
+
+	// Determine default format (first registered format, or empty if none)
+	var defaultFormat string
+	if len(options.OutputFormats()) > 0 {
+		defaultFormat = options.OutputFormats()[0].Name()
+	}
+
+	var commands []*v3.Command
+
+	// Build flags for add-event
+	flags_add_event := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}}
+
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "summary",
+		Usage: "Summary",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "description",
+		Usage: "Description",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "start-time",
+		Usage: "StartTime (google.protobuf.Timestamp)",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "end-time",
+		Usage: "EndTime (google.protobuf.Timestamp)",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "location",
+		Usage: "Location",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "guests-can-see-other-guests",
+		Usage: "GuestsCanSeeOtherGuests",
+	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "guests-can-modify",
+		Usage: "GuestsCanModify",
+	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "guests-can-invite-others",
+		Usage: "GuestsCanInviteOthers",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "idempotency-key",
+		Usage: "IdempotencyKey",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "source-title",
+		Usage: "SourceTitle",
+	})
+	flags_add_event = append(flags_add_event, &v3.StringFlag{
+		Name:  "source-url",
+		Usage: "SourceUrl",
+	})
+	flags_add_event = append(flags_add_event, &v3.BoolFlag{
+		Name:  "blocks-time",
+		Usage: "BlocksTime",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_add_event = append(flags_add_event, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			// Build request message
+			var req *AddEventRequest
+
+			// Check for custom flag deserializer for calendar.AddEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.AddEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*AddEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "AddEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &AddEventRequest{}
+				req.Summary = cmd.String("summary")
+				if cmd.IsSet("description") {
+					val := cmd.String("description")
+					req.Description = &val
+				}
+				// Field StartTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: start-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "start-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field StartTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.StartTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("start-time") {
+						return fmt.Errorf("flag --start-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				// Field EndTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: end-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "end-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field EndTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.EndTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("end-time") {
+						return fmt.Errorf("flag --end-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				if cmd.IsSet("location") {
+					val := cmd.String("location")
+					req.Location = &val
+				}
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+				if cmd.IsSet("guests-can-see-other-guests") {
+					val := cmd.Bool("guests-can-see-other-guests")
+					req.GuestsCanSeeOtherGuests = &val
+				}
+				if cmd.IsSet("guests-can-modify") {
+					val := cmd.Bool("guests-can-modify")
+					req.GuestsCanModify = &val
+				}
+				if cmd.IsSet("guests-can-invite-others") {
+					val := cmd.Bool("guests-can-invite-others")
+					req.GuestsCanInviteOthers = &val
+				}
+				if cmd.IsSet("idempotency-key") {
+					val := cmd.String("idempotency-key")
+					req.IdempotencyKey = &val
+				}
+				if cmd.IsSet("source-title") {
+					val := cmd.String("source-title")
+					req.SourceTitle = &val
+				}
+				if cmd.IsSet("source-url") {
+					val := cmd.String("source-url")
+					req.SourceUrl = &val
+				}
+				if cmd.IsSet("blocks-time") {
+					val := cmd.Bool("blocks-time")
+					req.BlocksTime = &val
+				}
+			}
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+			var resp *AddEventResponse
+			var err error
+
+			if remoteAddr != "" {
+				// Remote gRPC call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				resp, err = client.AddEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("remote call failed: %w", err)
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.AddEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("method failed: %w", err)
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find and use the appropriate output format
+			formatName := cmd.String("format")
+
+			// Try registered formats
+			for _, outputFmt := range options.OutputFormats() {
+				if outputFmt.Name() == formatName {
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Format not found - build list of available formats
+			var availableFormats []string
+			for _, f := range options.OutputFormats() {
+				availableFormats = append(availableFormats, f.Name())
+			}
+			if len(availableFormats) == 0 {
+				return fmt.Errorf("no output formats registered (use WithOutputFormats to register formats)")
+			}
+			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+		},
+		Flags: flags_add_event,
+		Name:  "add-event",
+		Usage: "AddEvent",
+	})
+
+	// Build flags for update-event
+	flags_update_event := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}}
+
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "event-id",
+		Usage: "EventId",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "summary",
+		Usage: "Summary",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "description",
+		Usage: "Description",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "start-time",
+		Usage: "StartTime (google.protobuf.Timestamp)",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "end-time",
+		Usage: "EndTime (google.protobuf.Timestamp)",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "location",
+		Usage: "Location",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "guests-can-see-other-guests",
+		Usage: "GuestsCanSeeOtherGuests",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "guests-can-modify",
+		Usage: "GuestsCanModify",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "guests-can-invite-others",
+		Usage: "GuestsCanInviteOthers",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "source-title",
+		Usage: "SourceTitle",
+	})
+	flags_update_event = append(flags_update_event, &v3.StringFlag{
+		Name:  "source-url",
+		Usage: "SourceUrl",
+	})
+	flags_update_event = append(flags_update_event, &v3.BoolFlag{
+		Name:  "blocks-time",
+		Usage: "BlocksTime",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_update_event = append(flags_update_event, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			// Build request message
+			var req *UpdateEventRequest
+
+			// Check for custom flag deserializer for calendar.UpdateEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.UpdateEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*UpdateEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "UpdateEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &UpdateEventRequest{}
+				req.EventId = cmd.String("event-id")
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+				if cmd.IsSet("summary") {
+					val := cmd.String("summary")
+					req.Summary = &val
+				}
+				if cmd.IsSet("description") {
+					val := cmd.String("description")
+					req.Description = &val
+				}
+				// Field StartTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: start-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "start-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field StartTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.StartTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("start-time") {
+						return fmt.Errorf("flag --start-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				// Field EndTime: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: end-time
+					fieldFlags := protocli.NewFlagContainer(cmd, "end-time")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field EndTime: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.EndTime = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("end-time") {
+						return fmt.Errorf("flag --end-time requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				if cmd.IsSet("location") {
+					val := cmd.String("location")
+					req.Location = &val
+				}
+				if cmd.IsSet("guests-can-see-other-guests") {
+					val := cmd.Bool("guests-can-see-other-guests")
+					req.GuestsCanSeeOtherGuests = &val
+				}
+				if cmd.IsSet("guests-can-modify") {
+					val := cmd.Bool("guests-can-modify")
+					req.GuestsCanModify = &val
+				}
+				if cmd.IsSet("guests-can-invite-others") {
+					val := cmd.Bool("guests-can-invite-others")
+					req.GuestsCanInviteOthers = &val
+				}
+				if cmd.IsSet("source-title") {
+					val := cmd.String("source-title")
+					req.SourceTitle = &val
+				}
+				if cmd.IsSet("source-url") {
+					val := cmd.String("source-url")
+					req.SourceUrl = &val
+				}
+				if cmd.IsSet("blocks-time") {
+					val := cmd.Bool("blocks-time")
+					req.BlocksTime = &val
+				}
+			}
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+			var resp *UpdateEventResponse
+			var err error
+
+			if remoteAddr != "" {
+				// Remote gRPC call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				resp, err = client.UpdateEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("remote call failed: %w", err)
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.UpdateEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("method failed: %w", err)
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find and use the appropriate output format
+			formatName := cmd.String("format")
+
+			// Try registered formats
+			for _, outputFmt := range options.OutputFormats() {
+				if outputFmt.Name() == formatName {
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Format not found - build list of available formats
+			var availableFormats []string
+			for _, f := range options.OutputFormats() {
+				availableFormats = append(availableFormats, f.Name())
+			}
+			if len(availableFormats) == 0 {
+				return fmt.Errorf("no output formats registered (use WithOutputFormats to register formats)")
+			}
+			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+		},
+		Flags: flags_update_event,
+		Name:  "update-event",
+		Usage: "UpdateEvent",
+	})
+
+	// Build flags for delete-event
+	flags_delete_event := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}}
+
+	flags_delete_event = append(flags_delete_event, &v3.StringFlag{
+		Name:  "event-id",
+		Usage: "EventId",
+	})
+	flags_delete_event = append(flags_delete_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_delete_event = append(flags_delete_event, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			// Build request message
+			var req *DeleteEventRequest
+
+			// Check for custom flag deserializer for calendar.DeleteEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.DeleteEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*DeleteEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "DeleteEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &DeleteEventRequest{}
+				req.EventId = cmd.String("event-id")
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+			}
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+			var resp *DeleteEventResponse
+			var err error
+
+			if remoteAddr != "" {
+				// Remote gRPC call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				resp, err = client.DeleteEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("remote call failed: %w", err)
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.DeleteEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("method failed: %w", err)
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find and use the appropriate output format
+			formatName := cmd.String("format")
+
+			// Try registered formats
+			for _, outputFmt := range options.OutputFormats() {
+				if outputFmt.Name() == formatName {
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Format not found - build list of available formats
+			var availableFormats []string
+			for _, f := range options.OutputFormats() {
+				availableFormats = append(availableFormats, f.Name())
+			}
+			if len(availableFormats) == 0 {
+				return fmt.Errorf("no output formats registered (use WithOutputFormats to register formats)")
+			}
+			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+		},
+		Flags: flags_delete_event,
+		Name:  "delete-event",
+		Usage: "DeleteEvent",
+	})
+
+	// Build flags for list-events
+	flags_list_events := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}, &v3.StringFlag{
+		Name:  "delimiter",
+		Usage: "Delimiter between streamed messages",
+		Value: "\n",
+	}}
+
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "after",
+		Usage: "After (google.protobuf.Timestamp)",
+	})
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "before",
+		Usage: "Before (google.protobuf.Timestamp)",
+	})
+	flags_list_events = append(flags_list_events, &v3.Int32Flag{
+		Name:  "limit",
+		Usage: "Limit",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_list_events = append(flags_list_events, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			// Build request message
+			var req *ListEventsRequest
+
+			// Check for custom flag deserializer for calendar.ListEventsRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.ListEventsRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*ListEventsRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "ListEventsRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &ListEventsRequest{}
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+				// Field After: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: after
+					fieldFlags := protocli.NewFlagContainer(cmd, "after")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field After: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.After = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("after") {
+						return fmt.Errorf("flag --after requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				// Field Before: check for custom deserializer for google.protobuf.Timestamp
+				if fieldDeserializer, hasFieldDeserializer := options.FlagDeserializer("google.protobuf.Timestamp"); hasFieldDeserializer {
+					// Use custom deserializer for nested message
+					// Create FlagContainer for field flag: before
+					fieldFlags := protocli.NewFlagContainer(cmd, "before")
+					fieldMsg, fieldErr := fieldDeserializer(cmdCtx, fieldFlags)
+					if fieldErr != nil {
+						return fmt.Errorf("failed to deserialize field Before: %w", fieldErr)
+					}
+					// Handle nil return from deserializer (means skip/use default)
+					if fieldMsg != nil {
+						typedField, fieldOk := fieldMsg.(*timestamppb.Timestamp)
+						if !fieldOk {
+							return fmt.Errorf("custom deserializer for google.protobuf.Timestamp returned wrong type: expected *Timestamp, got %T", fieldMsg)
+						}
+						req.Before = typedField
+					}
+				} else {
+					// No custom deserializer - check if user provided a value
+					if cmd.IsSet("before") {
+						return fmt.Errorf("flag --before requires a custom deserializer for google.protobuf.Timestamp (register with protocli.WithFlagDeserializer)")
+					}
+					// No value provided - leave field as nil
+				}
+				if cmd.IsSet("limit") {
+					val := cmd.Int32("limit")
+					req.Limit = &val
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find the appropriate output format
+			formatName := cmd.String("format")
+			var outputFmt protocli.OutputFormat
+			for _, f := range options.OutputFormats() {
+				if f.Name() == formatName {
+					outputFmt = f
+					break
+				}
+			}
+			if outputFmt == nil {
+				var availableFormats []string
+				for _, f := range options.OutputFormats() {
+					availableFormats = append(availableFormats, f.Name())
+				}
+				return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+			}
+
+			// Get delimiter for separating streamed messages
+			delimiter := cmd.String("delimiter")
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+
+			if remoteAddr != "" {
+				// Remote gRPC streaming call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				stream, err := client.ListEvents(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("failed to start stream: %w", err)
+				}
+
+				// Receive and format each message in the stream
+				var messageCount int
+				for {
+					msg, recvErr := stream.Recv()
+					if recvErr == io.EOF {
+						break
+					}
+					if recvErr != nil {
+						return fmt.Errorf("stream receive error: %w", recvErr)
+					}
+
+					// Format and write the message
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, msg); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+
+					// Write delimiter
+					if _, err := outputWriter.Write([]byte(delimiter)); err != nil {
+						return fmt.Errorf("failed to write delimiter: %w", err)
+					}
+					messageCount++
+				}
+
+				// Write final newline to keep terminal clean (only if delimiter doesn't already end with newline)
+				if messageCount > 0 && !strings.HasSuffix(delimiter, "\n") {
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+
+				// Create local stream wrapper for direct call
+				localStream := &localServerStream_ListEvents{
+					ctx:       cmdCtx,
+					errors:    make(chan error),
+					responses: make(chan *Event),
+				}
+
+				// Call streaming method in goroutine
+				go func() {
+					var methodErr error
+					methodErr = svcImpl.ListEvents(req, localStream)
+					close(localStream.responses)
+					if methodErr != nil {
+						localStream.errors <- methodErr
+					}
+					close(localStream.errors)
+				}()
+
+				// Receive and format each message in the stream
+				var messageCount int
+				for {
+					select {
+					case msg, ok := <-localStream.responses:
+						if !ok {
+							// Stream closed, check for errors
+							if streamErr := <-localStream.errors; streamErr != nil {
+								return fmt.Errorf("stream error: %w", streamErr)
+							}
+							// Write final newline to keep terminal clean (only if delimiter doesn't already end with newline)
+							if messageCount > 0 && !strings.HasSuffix(delimiter, "\n") {
+								if _, err := outputWriter.Write([]byte("\n")); err != nil {
+									return fmt.Errorf("failed to write final newline: %w", err)
+								}
+							}
+							return nil
+						}
+
+						// Format and write the message
+						if err := outputFmt.Format(cmdCtx, cmd, outputWriter, msg); err != nil {
+							return fmt.Errorf("format failed: %w", err)
+						}
+
+						// Write delimiter
+						if _, err := outputWriter.Write([]byte(delimiter)); err != nil {
+							return fmt.Errorf("failed to write delimiter: %w", err)
+						}
+						messageCount++
+					case <-cmdCtx.Done():
+						return cmdCtx.Err()
+					}
+				}
+			}
+
+			return nil
+		},
+		Flags: flags_list_events,
+		Name:  "list-events",
+		Usage: "ListEvents (streaming)",
+	})
+
+	// Create ServiceCLI for daemonize command
+	serviceCLI := &protocli.ServiceCLI{
+		ConfigMessageType: "",
+		FactoryOrImpl:     implOrFactory,
+		RegisterFunc: func(s *grpc.Server, impl interface{}) {
+			RegisterCalendarServiceServer(s, impl.(CalendarServiceServer))
+		},
+		ServiceName: "calendar-service",
+	}
+
+	// Create daemonize command for starting gRPC server
+	daemonCmd := protocli.NewDaemonizeCommand(ctx, []*protocli.ServiceCLI{serviceCLI}, options)
+
+	// Append daemonize command to the list
+	commands = append(commands, daemonCmd)
+
+	return commands
 }

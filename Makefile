@@ -35,7 +35,7 @@ clean: ## Clean build artifacts and generated proto files
 .PHONY: generate
 generate: ## Generate proto files using buf
 	@echo "Generating proto files..."
-	go run github.com/bufbuild/buf/cmd/buf generate
+	go generate ./...
 	@echo "✓ Proto generation complete"
 
 .PHONY: generate/clean
@@ -43,7 +43,7 @@ generate/clean: ## Clean and regenerate all proto files
 	@echo "Cleaning generated proto files..."
 	rm -f proto/*.pb.go
 	@echo "Regenerating proto files..."
-	go run github.com/bufbuild/buf/cmd/buf generate
+	go generate ./...
 	@echo "✓ Clean regeneration complete"
 
 ##@ Test
@@ -69,7 +69,7 @@ lint: ## Run linter on all files
 .PHONY: fmt
 fmt: ## Auto-format code
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint fmt ./...
-	go fmt ./...
+	go run mvdan.cc/gofumpt -l -w .
 
 ##@ Misc.
 
