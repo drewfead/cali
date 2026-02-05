@@ -1,0 +1,1 @@
+{{with protoField . "event"}}{{template "event" .}}{{end}}

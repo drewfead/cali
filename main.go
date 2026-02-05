@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/drewfead/cali/internal/auth"
@@ -15,6 +18,15 @@ import (
 	protobuf "google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+//go:embed event.template.ics
+var eventTemplateICS string
+
+//go:embed list-events-response.template.ics
+var listEventsResponseTemplateICS string
+
+//go:embed get-event-response.template.ics
+var getEventResponseTemplateICS string
 
 type calendarService struct {
 	proto.UnimplementedCalendarServiceServer
@@ -101,14 +113,37 @@ func (s *calendarService) AddEvent(ctx context.Context, req *proto.AddEventReque
 		}, err
 	}
 
+	// Log calendar ID for debugging
+	calendarIDForLog := "primary"
+	if req.CalendarId != nil && *req.CalendarId != "" {
+		calendarIDForLog = *req.CalendarId
+	}
+	slog.Debug("creating event",
+		"calendar_id", calendarIDForLog,
+		"calendar_id_ptr", req.CalendarId,
+		"summary", req.Summary,
+		"location", req.Location)
+
 	// Create event via Google Calendar API
 	event, err := s.calendarClient.CreateEvent(ctx, req)
 	if err != nil {
+		slog.Error("failed to create event", "error", err, "calendar_id", calendarIDForLog)
 		return &proto.AddEventResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to create event in Google Calendar: %v", err),
 		}, err
 	}
+
+	// Validate that the event was actually created
+	if event == nil || event.Id == "" {
+		slog.Error("created event has no ID", "calendar_id", calendarIDForLog)
+		return &proto.AddEventResponse{
+			Success: false,
+			Message: "Event creation succeeded but returned event has no ID",
+		}, fmt.Errorf("created event is missing ID")
+	}
+
+	slog.Info("event created successfully", "event_id", event.Id, "calendar_id", calendarIDForLog)
 
 	// Use calendar_id from request, default to "primary"
 	calendarID := "primary"
@@ -189,25 +224,51 @@ func (s *calendarService) DeleteEvent(ctx context.Context, req *proto.DeleteEven
 	}, nil
 }
 
+func (s *calendarService) GetEvent(ctx context.Context, req *proto.GetEventRequest) (*proto.GetEventResponse, error) {
+	// Lazily initialize calendar client on first use
+	if err := s.ensureInitialized(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize calendar client: %w", err)
+	}
+
+	// Get event via Google Calendar API
+	event, err := s.calendarClient.GetEvent(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get event: %w", err)
+	}
+
+	// Validate that the event was retrieved
+	if event == nil || event.Id == "" {
+		slog.Error("retrieved event is invalid", "event_id", req.EventId, "calendar_id", req.CalendarId)
+		return nil, fmt.Errorf("retrieved event has no ID (requested: %s)", req.EventId)
+	}
+
+	// Use calendar_id from request, default to "primary"
+	calendarID := "primary"
+	if req.CalendarId != nil && *req.CalendarId != "" {
+		calendarID = *req.CalendarId
+	}
+
+	// Convert to proto Event
+	protoEvent := calendar.MapEventToProto(event, calendarID)
+
+	return &proto.GetEventResponse{
+		Event: protoEvent,
+	}, nil
+}
+
 func (s *calendarService) ListEvents(req *proto.ListEventsRequest, stream proto.CalendarService_ListEventsServer) error {
 	// Lazily initialize calendar client on first use
 	if err := s.ensureInitialized(stream.Context()); err != nil {
 		return fmt.Errorf("failed to initialize calendar client: %w", err)
 	}
 
-	// Default to primary calendar if not specified
-	calendarID := "primary"
-	if req.CalendarId != nil && *req.CalendarId != "" {
-		calendarID = *req.CalendarId
-	}
+	// Get response channel from calendar client
+	responseChan, errChan := s.calendarClient.ListEvents(stream.Context(), req)
 
-	// Get events channel from calendar client
-	eventsChan, errChan := s.calendarClient.ListEvents(stream.Context(), req)
-
-	// Stream events back to client
+	// Stream responses back to client
 	for {
 		select {
-		case event, ok := <-eventsChan:
+		case response, ok := <-responseChan:
 			if !ok {
 				// Channel closed, check for errors
 				select {
@@ -221,10 +282,9 @@ func (s *calendarService) ListEvents(req *proto.ListEventsRequest, stream proto.
 				return nil
 			}
 
-			// Convert Google Calendar event to proto and send
-			protoEvent := calendar.MapEventToProto(event, calendarID)
-			if err := stream.Send(protoEvent); err != nil {
-				return fmt.Errorf("failed to send event: %w", err)
+			// Send response (contains either an event or next_anchor)
+			if err := stream.Send(response); err != nil {
+				return fmt.Errorf("failed to send response: %w", err)
 			}
 
 		case err := <-errChan:
@@ -236,6 +296,28 @@ func (s *calendarService) ListEvents(req *proto.ListEventsRequest, stream proto.
 			return stream.Context().Err()
 		}
 	}
+}
+
+// ICS format helper functions
+func icsTimestamp(ts *timestamppb.Timestamp) string {
+	if ts == nil || !ts.IsValid() {
+		return ""
+	}
+	// Format: YYYYMMDDTHHMMSSZ
+	return ts.AsTime().UTC().Format("20060102T150405Z")
+}
+
+func icsEscape(s string) string {
+	// Escape special characters per RFC 5545
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, ",", "\\,")
+	s = strings.ReplaceAll(s, ";", "\\;")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	return s
+}
+
+func icsNow() string {
+	return time.Now().UTC().Format("20060102T150405Z")
 }
 
 func main() {
@@ -269,6 +351,30 @@ func main() {
 		return timestamppb.New(t), nil
 	}
 
+
+	// Create ICS format for calendar events (templates loaded from embedded files)
+	// Response templates use {{template "event" ...}} to reuse event template definition
+	// Prepend event template to response templates so they have access to the "event" definition
+	icsTemplates := map[string]string{
+		"calendar.Event":              eventTemplateICS,
+		"calendar.ListEventsResponse": eventTemplateICS + listEventsResponseTemplateICS,
+		"calendar.GetEventResponse":   eventTemplateICS + getEventResponseTemplateICS,
+	}
+
+	// Build function map with helper functions
+	icsFuncMap := template.FuncMap{
+		"icsTime":   icsTimestamp,
+		"icsEscape": icsEscape,
+		"now":       icsNow,
+		"upper":     strings.ToUpper,
+	}
+
+	icsFormat, err := protocli.TemplateFormat("ics", icsTemplates, icsFuncMap)
+	if err != nil {
+		slog.Error("failed to create ICS format", "error", err)
+		os.Exit(1)
+	}
+
 	// Create service instance with lazy authentication
 	// Authentication only happens when AddEvent is called
 	svc := newCalendarService(cfg)
@@ -278,6 +384,7 @@ func main() {
 		protocli.WithOutputFormats(
 			protocli.JSON(),
 			protocli.YAML(),
+			icsFormat,
 		),
 		protocli.WithFlagDeserializer("google.protobuf.Timestamp", timestampDeserializer),
 	)

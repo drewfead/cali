@@ -35,11 +35,11 @@ func getOutputWriter(cmd *v3.Command, path string) (io.Writer, error) {
 // localServerStream_ListEvents is a helper type for local server streaming calls to ListEvents
 type localServerStream_ListEvents struct {
 	ctx       context.Context
-	responses chan *Event
+	responses chan *ListEventsResponse
 	errors    chan error
 }
 
-func (s *localServerStream_ListEvents) Send(resp *Event) error {
+func (s *localServerStream_ListEvents) Send(resp *ListEventsResponse) error {
 	select {
 	case s.responses <- resp:
 		return nil
@@ -63,9 +63,9 @@ func (s *localServerStream_ListEvents) SendHeader(metadata.MD) error {
 func (s *localServerStream_ListEvents) SetTrailer(metadata.MD) {}
 
 func (s *localServerStream_ListEvents) SendMsg(m any) error {
-	msg, ok := m.(*Event)
+	msg, ok := m.(*ListEventsResponse)
 	if !ok {
-		return fmt.Errorf("invalid message type: expected *%s, got %T", "Event", m)
+		return fmt.Errorf("invalid message type: expected *%s, got %T", "ListEventsResponse", m)
 	}
 	return s.Send(msg)
 }
@@ -787,6 +787,154 @@ func CalendarServiceCommand(ctx context.Context, implOrFactory interface{}, opts
 		Usage: "DeleteEvent",
 	})
 
+	// Build flags for get-event
+	flags_get_event := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}}
+
+	flags_get_event = append(flags_get_event, &v3.StringFlag{
+		Name:  "event-id",
+		Usage: "EventId",
+	})
+	flags_get_event = append(flags_get_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_get_event = append(flags_get_event, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			// Build request message
+			var req *GetEventRequest
+
+			// Check for custom flag deserializer for calendar.GetEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.GetEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*GetEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "GetEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &GetEventRequest{}
+				req.EventId = cmd.String("event-id")
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+			}
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+			var resp *GetEventResponse
+			var err error
+
+			if remoteAddr != "" {
+				// Remote gRPC call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				resp, err = client.GetEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("remote call failed: %w", err)
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.GetEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("method failed: %w", err)
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find and use the appropriate output format
+			formatName := cmd.String("format")
+
+			// Try registered formats
+			for _, outputFmt := range options.OutputFormats() {
+				if outputFmt.Name() == formatName {
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Format not found - build list of available formats
+			var availableFormats []string
+			for _, f := range options.OutputFormats() {
+				availableFormats = append(availableFormats, f.Name())
+			}
+			if len(availableFormats) == 0 {
+				return fmt.Errorf("no output formats registered (use WithOutputFormats to register formats)")
+			}
+			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+		},
+		Flags: flags_get_event,
+		Name:  "get-event",
+		Usage: "GetEvent",
+	})
+
 	// Build flags for list-events
 	flags_list_events := []v3.Flag{&v3.StringFlag{
 		Name:  "remote",
@@ -817,9 +965,21 @@ func CalendarServiceCommand(ctx context.Context, implOrFactory interface{}, opts
 		Name:  "before",
 		Usage: "Before (google.protobuf.Timestamp)",
 	})
+	flags_list_events = append(flags_list_events, &v3.BoolFlag{
+		Name:  "future",
+		Usage: "Future",
+	})
+	flags_list_events = append(flags_list_events, &v3.BoolFlag{
+		Name:  "past",
+		Usage: "Past",
+	})
 	flags_list_events = append(flags_list_events, &v3.Int32Flag{
 		Name:  "limit",
 		Usage: "Limit",
+	})
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "anchor",
+		Usage: "Anchor",
 	})
 
 	// Add format-specific flags from registered formats
@@ -922,9 +1082,21 @@ func CalendarServiceCommand(ctx context.Context, implOrFactory interface{}, opts
 					}
 					// No value provided - leave field as nil
 				}
+				if cmd.IsSet("future") {
+					val := cmd.Bool("future")
+					req.Future = &val
+				}
+				if cmd.IsSet("past") {
+					val := cmd.Bool("past")
+					req.Past = &val
+				}
 				if cmd.IsSet("limit") {
 					val := cmd.Int32("limit")
 					req.Limit = &val
+				}
+				if cmd.IsSet("anchor") {
+					val := cmd.String("anchor")
+					req.Anchor = &val
 				}
 			}
 
@@ -1011,7 +1183,7 @@ func CalendarServiceCommand(ctx context.Context, implOrFactory interface{}, opts
 				localStream := &localServerStream_ListEvents{
 					ctx:       cmdCtx,
 					errors:    make(chan error),
-					responses: make(chan *Event),
+					responses: make(chan *ListEventsResponse),
 				}
 
 				// Call streaming method in goroutine
@@ -1797,6 +1969,154 @@ func CalendarServiceCommandsFlat(ctx context.Context, implOrFactory interface{},
 		Usage: "DeleteEvent",
 	})
 
+	// Build flags for get-event
+	flags_get_event := []v3.Flag{&v3.StringFlag{
+		Name:  "remote",
+		Usage: "Remote gRPC server address (host:port). If set, uses gRPC client instead of direct call",
+	}, &v3.StringFlag{
+		Name:  "format",
+		Usage: "Output format (use --format to see available formats)",
+		Value: defaultFormat,
+	}, &v3.StringFlag{
+		Name:  "output",
+		Usage: "Output file (- for stdout)",
+		Value: "-",
+	}}
+
+	flags_get_event = append(flags_get_event, &v3.StringFlag{
+		Name:  "event-id",
+		Usage: "EventId",
+	})
+	flags_get_event = append(flags_get_event, &v3.StringFlag{
+		Name:  "calendar-id",
+		Usage: "CalendarId",
+	})
+
+	// Add format-specific flags from registered formats
+	for _, outputFmt := range options.OutputFormats() {
+		// Check if format implements FlagConfiguredOutputFormat
+		if flagConfigured, ok := outputFmt.(protocli.FlagConfiguredOutputFormat); ok {
+			flags_get_event = append(flags_get_event, flagConfigured.Flags()...)
+		}
+	}
+
+	commands = append(commands, &v3.Command{
+		Action: func(cmdCtx context.Context, cmd *v3.Command) error {
+			defer func() {
+				hooks := options.AfterCommandHooks()
+				for i := len(hooks) - 1; i >= 0; i-- {
+					if err := hooks[i](cmdCtx, cmd); err != nil {
+						slog.Warn("after hook failed", "error", err)
+					}
+				}
+			}()
+
+			for _, hook := range options.BeforeCommandHooks() {
+				if err := hook(cmdCtx, cmd); err != nil {
+					return fmt.Errorf("before hook failed: %w", err)
+				}
+			}
+
+			// Build request message
+			var req *GetEventRequest
+
+			// Check for custom flag deserializer for calendar.GetEventRequest
+			deserializer, hasDeserializer := options.FlagDeserializer("calendar.GetEventRequest")
+			if hasDeserializer {
+				// Use custom deserializer for top-level request
+				// Create FlagContainer (deserializer can access multiple flags via Command())
+				requestFlags := protocli.NewFlagContainer(cmd, "")
+				msg, err := deserializer(cmdCtx, requestFlags)
+				if err != nil {
+					return fmt.Errorf("custom deserializer failed: %w", err)
+				}
+				// Handle nil return from deserializer
+				if msg == nil {
+					return fmt.Errorf("custom deserializer returned nil message")
+				}
+				var ok bool
+				req, ok = msg.(*GetEventRequest)
+				if !ok {
+					return fmt.Errorf("custom deserializer returned wrong type: expected *%s, got %T", "GetEventRequest", msg)
+				}
+			} else {
+				// Use auto-generated flag parsing
+				req = &GetEventRequest{}
+				req.EventId = cmd.String("event-id")
+				if cmd.IsSet("calendar-id") {
+					val := cmd.String("calendar-id")
+					req.CalendarId = &val
+				}
+			}
+
+			// Check if using remote gRPC call or direct implementation call
+			remoteAddr := cmd.String("remote")
+			var resp *GetEventResponse
+			var err error
+
+			if remoteAddr != "" {
+				// Remote gRPC call
+				conn, connErr := grpc.NewClient(remoteAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if connErr != nil {
+					return fmt.Errorf("failed to connect to remote %s: %w", remoteAddr, connErr)
+				}
+				defer conn.Close()
+
+				client := NewCalendarServiceClient(conn)
+				resp, err = client.GetEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("remote call failed: %w", err)
+				}
+			} else {
+				// Direct implementation call (no config)
+				svcImpl := implOrFactory.(CalendarServiceServer)
+				resp, err = svcImpl.GetEvent(cmdCtx, req)
+				if err != nil {
+					return fmt.Errorf("method failed: %w", err)
+				}
+			}
+
+			// Open output writer
+			outputWriter, err := getOutputWriter(cmd, cmd.String("output"))
+			if err != nil {
+				return fmt.Errorf("failed to open output: %w", err)
+			}
+			if closer, ok := outputWriter.(io.Closer); ok {
+				defer closer.Close()
+			}
+
+			// Find and use the appropriate output format
+			formatName := cmd.String("format")
+
+			// Try registered formats
+			for _, outputFmt := range options.OutputFormats() {
+				if outputFmt.Name() == formatName {
+					if err := outputFmt.Format(cmdCtx, cmd, outputWriter, resp); err != nil {
+						return fmt.Errorf("format failed: %w", err)
+					}
+					// Write final newline to keep terminal clean
+					if _, err := outputWriter.Write([]byte("\n")); err != nil {
+						return fmt.Errorf("failed to write final newline: %w", err)
+					}
+					return nil
+				}
+			}
+
+			// Format not found - build list of available formats
+			var availableFormats []string
+			for _, f := range options.OutputFormats() {
+				availableFormats = append(availableFormats, f.Name())
+			}
+			if len(availableFormats) == 0 {
+				return fmt.Errorf("no output formats registered (use WithOutputFormats to register formats)")
+			}
+			return fmt.Errorf("unknown format %q (available: %v)", formatName, availableFormats)
+		},
+		Flags: flags_get_event,
+		Name:  "get-event",
+		Usage: "GetEvent",
+	})
+
 	// Build flags for list-events
 	flags_list_events := []v3.Flag{&v3.StringFlag{
 		Name:  "remote",
@@ -1827,9 +2147,21 @@ func CalendarServiceCommandsFlat(ctx context.Context, implOrFactory interface{},
 		Name:  "before",
 		Usage: "Before (google.protobuf.Timestamp)",
 	})
+	flags_list_events = append(flags_list_events, &v3.BoolFlag{
+		Name:  "future",
+		Usage: "Future",
+	})
+	flags_list_events = append(flags_list_events, &v3.BoolFlag{
+		Name:  "past",
+		Usage: "Past",
+	})
 	flags_list_events = append(flags_list_events, &v3.Int32Flag{
 		Name:  "limit",
 		Usage: "Limit",
+	})
+	flags_list_events = append(flags_list_events, &v3.StringFlag{
+		Name:  "anchor",
+		Usage: "Anchor",
 	})
 
 	// Add format-specific flags from registered formats
@@ -1932,9 +2264,21 @@ func CalendarServiceCommandsFlat(ctx context.Context, implOrFactory interface{},
 					}
 					// No value provided - leave field as nil
 				}
+				if cmd.IsSet("future") {
+					val := cmd.Bool("future")
+					req.Future = &val
+				}
+				if cmd.IsSet("past") {
+					val := cmd.Bool("past")
+					req.Past = &val
+				}
 				if cmd.IsSet("limit") {
 					val := cmd.Int32("limit")
 					req.Limit = &val
+				}
+				if cmd.IsSet("anchor") {
+					val := cmd.String("anchor")
+					req.Anchor = &val
 				}
 			}
 
@@ -2021,7 +2365,7 @@ func CalendarServiceCommandsFlat(ctx context.Context, implOrFactory interface{},
 				localStream := &localServerStream_ListEvents{
 					ctx:       cmdCtx,
 					errors:    make(chan error),
-					responses: make(chan *Event),
+					responses: make(chan *ListEventsResponse),
 				}
 
 				// Call streaming method in goroutine

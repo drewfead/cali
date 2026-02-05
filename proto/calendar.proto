@@ -5,7 +5,6 @@ package calendar;
 option go_package = "github.com/drewfead/cali/proto";
 
 import "google/protobuf/timestamp.proto";
-import "proto/cli/v1/cli.proto";
 
 service CalendarService {
   // AddEvent adds a one-time calendar event
@@ -17,8 +16,11 @@ service CalendarService {
   // DeleteEvent removes a calendar event
   rpc DeleteEvent(DeleteEventRequest) returns (DeleteEventResponse);
 
+  // GetEvent retrieves a single calendar event by ID
+  rpc GetEvent(GetEventRequest) returns (GetEventResponse);
+
   // ListEvents streams all events from a calendar
-  rpc ListEvents(ListEventsRequest) returns (stream Event);
+  rpc ListEvents(ListEventsRequest) returns (stream ListEventsResponse);
 }
 
 message AddEventRequest {
@@ -80,11 +82,34 @@ message DeleteEventResponse {
   string calendar_id = 3;
 }
 
+message GetEventRequest {
+  string event_id = 1;
+  optional string calendar_id = 2;  // defaults to "primary"
+}
+
+message GetEventResponse {
+  Event event = 1;
+}
+
 message ListEventsRequest {
   optional string calendar_id = 1;  // defaults to "primary"
-  optional google.protobuf.Timestamp after = 2;  // only events after this time
+
+  // Time filtering options (mutually exclusive with after/before)
+  optional google.protobuf.Timestamp after = 2;   // only events after this time
   optional google.protobuf.Timestamp before = 3;  // only events before this time
-  optional int32 limit = 4;  // maximum number of events to return
+
+  // Predefined time scopes (mutually exclusive with each other and with after/before)
+  optional bool future = 4;  // events after now
+  optional bool past = 5;    // events before now
+  // If no time filter is specified, returns all events
+
+  optional int32 limit = 6;  // page size (number of events per page)
+  optional string anchor = 7;  // token for retrieving the next page of results
+}
+
+message ListEventsResponse {
+  Event event = 1;  // the event (present for all messages except potentially the last)
+  optional string next_anchor = 2;  // token for the next page (only set on the last message if more results exist)
 }
 
 message Event {
@@ -98,4 +123,11 @@ message Event {
   string calendar_id = 8;
   optional string status = 9;  // confirmed, tentative, cancelled
   repeated string attendees = 10;
+  optional string transparency = 11;  // "opaque" (blocks time) or "transparent" (doesn't block time)
+  optional string organizer_email = 12;
+  optional string organizer_name = 13;
+  optional string conference_uri = 14;  // Primary video conference link (Google Meet, Zoom, etc.)
+  optional string conference_id = 15;   // Conference ID (e.g., "abc-defg-hij" for Meet)
+  optional string source_title = 16;  // Title of the source of the event
+  optional string source_url = 17;    // URL for the source of the event
 }

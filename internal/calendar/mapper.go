@@ -181,6 +181,44 @@ func MapEventToProto(event *calendar.Event, calendarID string) *proto.Event {
 	if event.Status != "" {
 		protoEvent.Status = &event.Status
 	}
+	if event.Transparency != "" {
+		protoEvent.Transparency = &event.Transparency
+	}
+
+	// Extract organizer information
+	if event.Organizer != nil {
+		if event.Organizer.Email != "" {
+			protoEvent.OrganizerEmail = &event.Organizer.Email
+		}
+		if event.Organizer.DisplayName != "" {
+			protoEvent.OrganizerName = &event.Organizer.DisplayName
+		}
+	}
+
+	// Extract conference data (primary video link)
+	if event.ConferenceData != nil {
+		// Get the primary video conference link
+		for _, entryPoint := range event.ConferenceData.EntryPoints {
+			if entryPoint.EntryPointType == "video" && entryPoint.Uri != "" {
+				protoEvent.ConferenceUri = &entryPoint.Uri
+				break
+			}
+		}
+		// Get conference ID
+		if event.ConferenceData.ConferenceId != "" {
+			protoEvent.ConferenceId = &event.ConferenceData.ConferenceId
+		}
+	}
+
+	// Extract source information
+	if event.Source != nil {
+		if event.Source.Title != "" {
+			protoEvent.SourceTitle = &event.Source.Title
+		}
+		if event.Source.Url != "" {
+			protoEvent.SourceUrl = &event.Source.Url
+		}
+	}
 
 	// Parse start time
 	if event.Start != nil {

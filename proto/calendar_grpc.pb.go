@@ -22,6 +22,7 @@ const (
 	CalendarService_AddEvent_FullMethodName    = "/calendar.CalendarService/AddEvent"
 	CalendarService_UpdateEvent_FullMethodName = "/calendar.CalendarService/UpdateEvent"
 	CalendarService_DeleteEvent_FullMethodName = "/calendar.CalendarService/DeleteEvent"
+	CalendarService_GetEvent_FullMethodName    = "/calendar.CalendarService/GetEvent"
 	CalendarService_ListEvents_FullMethodName  = "/calendar.CalendarService/ListEvents"
 )
 
@@ -35,8 +36,10 @@ type CalendarServiceClient interface {
 	UpdateEvent(ctx context.Context, in *UpdateEventRequest, opts ...grpc.CallOption) (*UpdateEventResponse, error)
 	// DeleteEvent removes a calendar event
 	DeleteEvent(ctx context.Context, in *DeleteEventRequest, opts ...grpc.CallOption) (*DeleteEventResponse, error)
+	// GetEvent retrieves a single calendar event by ID
+	GetEvent(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (*GetEventResponse, error)
 	// ListEvents streams all events from a calendar
-	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
+	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ListEventsResponse], error)
 }
 
 type calendarServiceClient struct {
@@ -77,13 +80,23 @@ func (c *calendarServiceClient) DeleteEvent(ctx context.Context, in *DeleteEvent
 	return out, nil
 }
 
-func (c *calendarServiceClient) ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error) {
+func (c *calendarServiceClient) GetEvent(ctx context.Context, in *GetEventRequest, opts ...grpc.CallOption) (*GetEventResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetEventResponse)
+	err := c.cc.Invoke(ctx, CalendarService_GetEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *calendarServiceClient) ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ListEventsResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &CalendarService_ServiceDesc.Streams[0], CalendarService_ListEvents_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[ListEventsRequest, Event]{ClientStream: stream}
+	x := &grpc.GenericClientStream[ListEventsRequest, ListEventsResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -94,7 +107,7 @@ func (c *calendarServiceClient) ListEvents(ctx context.Context, in *ListEventsRe
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type CalendarService_ListEventsClient = grpc.ServerStreamingClient[Event]
+type CalendarService_ListEventsClient = grpc.ServerStreamingClient[ListEventsResponse]
 
 // CalendarServiceServer is the server API for CalendarService service.
 // All implementations must embed UnimplementedCalendarServiceServer
@@ -106,8 +119,10 @@ type CalendarServiceServer interface {
 	UpdateEvent(context.Context, *UpdateEventRequest) (*UpdateEventResponse, error)
 	// DeleteEvent removes a calendar event
 	DeleteEvent(context.Context, *DeleteEventRequest) (*DeleteEventResponse, error)
+	// GetEvent retrieves a single calendar event by ID
+	GetEvent(context.Context, *GetEventRequest) (*GetEventResponse, error)
 	// ListEvents streams all events from a calendar
-	ListEvents(*ListEventsRequest, grpc.ServerStreamingServer[Event]) error
+	ListEvents(*ListEventsRequest, grpc.ServerStreamingServer[ListEventsResponse]) error
 	mustEmbedUnimplementedCalendarServiceServer()
 }
 
@@ -127,7 +142,10 @@ func (UnimplementedCalendarServiceServer) UpdateEvent(context.Context, *UpdateEv
 func (UnimplementedCalendarServiceServer) DeleteEvent(context.Context, *DeleteEventRequest) (*DeleteEventResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteEvent not implemented")
 }
-func (UnimplementedCalendarServiceServer) ListEvents(*ListEventsRequest, grpc.ServerStreamingServer[Event]) error {
+func (UnimplementedCalendarServiceServer) GetEvent(context.Context, *GetEventRequest) (*GetEventResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetEvent not implemented")
+}
+func (UnimplementedCalendarServiceServer) ListEvents(*ListEventsRequest, grpc.ServerStreamingServer[ListEventsResponse]) error {
 	return status.Error(codes.Unimplemented, "method ListEvents not implemented")
 }
 func (UnimplementedCalendarServiceServer) mustEmbedUnimplementedCalendarServiceServer() {}
@@ -205,16 +223,34 @@ func _CalendarService_DeleteEvent_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CalendarService_GetEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetEventRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CalendarServiceServer).GetEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CalendarService_GetEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CalendarServiceServer).GetEvent(ctx, req.(*GetEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _CalendarService_ListEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ListEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(CalendarServiceServer).ListEvents(m, &grpc.GenericServerStream[ListEventsRequest, Event]{ServerStream: stream})
+	return srv.(CalendarServiceServer).ListEvents(m, &grpc.GenericServerStream[ListEventsRequest, ListEventsResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type CalendarService_ListEventsServer = grpc.ServerStreamingServer[Event]
+type CalendarService_ListEventsServer = grpc.ServerStreamingServer[ListEventsResponse]
 
 // CalendarService_ServiceDesc is the grpc.ServiceDesc for CalendarService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -234,6 +270,10 @@ var CalendarService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteEvent",
 			Handler:    _CalendarService_DeleteEvent_Handler,
+		},
+		{
+			MethodName: "GetEvent",
+			Handler:    _CalendarService_GetEvent_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

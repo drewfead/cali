@@ -1,0 +1,23 @@
+{{define "event"}}BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//cali//Calendar CLI v1.0//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:{{.GetId}}@{{.GetCalendarId}}
+DTSTAMP:{{now}}{{with .GetStartTime}}
+DTSTART:{{icsTime .}}{{end}}{{with .GetEndTime}}
+DTEND:{{icsTime .}}{{end}}{{if .GetSummary}}
+SUMMARY:{{icsEscape .GetSummary}}{{end}}{{with .GetDescription}}
+DESCRIPTION:{{icsEscape .}}{{end}}{{with .GetLocation}}
+LOCATION:{{icsEscape .}}{{end}}{{with .GetOrganizerEmail}}{{if $.GetOrganizerName}}
+ORGANIZER;CN={{icsEscape $.GetOrganizerName}}:mailto:{{.}}{{else}}
+ORGANIZER:mailto:{{.}}{{end}}{{end}}{{range .GetAttendees}}
+ATTENDEE:mailto:{{.}}{{end}}{{with .GetTransparency}}
+TRANSP:{{upper .}}{{end}}{{with .GetStatus}}
+STATUS:{{upper .}}{{end}}{{with .GetConferenceUri}}
+URL:{{.}}{{end}}{{with .GetSourceTitle}}
+X-SOURCE-TITLE:{{icsEscape .}}{{end}}{{with .GetSourceUrl}}
+X-SOURCE-URL:{{.}}{{end}}
+END:VEVENT
+END:VCALENDAR{{end}}
